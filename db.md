@@ -1,0 +1,1 @@
+supabase-central-gen = DiVy1kLSIbzRmbq7
