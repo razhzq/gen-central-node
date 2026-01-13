@@ -582,13 +582,14 @@ module.exports.getInvestmentCategoriesCtrl = async (req, res) => {
   try {
     const EMISSION_FACTOR = 0.71;
 
-    // Get category summaries
+    // Get category summaries with total valuation
     const result = await query(
       `SELECT 
         s.category,
         COUNT(DISTINCT s.id) as site_count,
         COUNT(DISTINCT m.id) as meter_count,
-        COALESCE(SUM(latest_energy.total_energy_kwh), 0) as total_energy_kwh
+        COALESCE(SUM(latest_energy.total_energy_kwh), 0) as total_energy_kwh,
+        COALESCE(SUM(s.sites_valuation), 0) as total_valuation
        FROM sites s
        LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
        LEFT JOIN LATERAL (
@@ -605,6 +606,7 @@ module.exports.getInvestmentCategoriesCtrl = async (req, res) => {
     const categories = result.rows.map((row) => {
       const totalEnergyKwh = parseFloat(row.total_energy_kwh) || 0;
       const co2OffsetTons = (totalEnergyKwh * EMISSION_FACTOR) / 1000;
+      const totalValuation = parseFloat(row.total_valuation) || 0;
       
       return {
         category: row.category.toLowerCase(),
@@ -612,6 +614,7 @@ module.exports.getInvestmentCategoriesCtrl = async (req, res) => {
         totalEnergyKwh: parseFloat(totalEnergyKwh.toFixed(2)),
         co2OffsetTons: parseFloat(co2OffsetTons.toFixed(2)),
         activeMeters: parseInt(row.meter_count) || 0,
+        totalValuation: parseFloat(totalValuation.toFixed(2)),
       };
     });
 
@@ -643,6 +646,7 @@ module.exports.getInvestmentAssetsByCategoryCtrl = async (req, res) => {
         s.name,
         s.location,
         s.category,
+        s.sites_valuation,
         COUNT(DISTINCT m.id) as meter_count,
         COALESCE(MAX(latest_data.peak_power_w), 0) as peak_power_w,
         COALESCE(MAX(latest_data.total_energy_kwh), 0) as total_energy_kwh,
@@ -659,7 +663,7 @@ module.exports.getInvestmentAssetsByCategoryCtrl = async (req, res) => {
          WHERE tb.meter_id = m.id AND tb.status = 'VALIDATED'
        ) latest_data ON true
        WHERE UPPER(s.category::text) = UPPER($1)
-       GROUP BY s.id, s.name, s.location, s.category
+       GROUP BY s.id, s.name, s.location, s.category, s.sites_valuation
        ORDER BY s.name`,
       [category]
     );
@@ -669,9 +673,8 @@ module.exports.getInvestmentAssetsByCategoryCtrl = async (req, res) => {
       const peakPowerKw = (parseFloat(row.peak_power_w) || 0) / 1000;
       const co2OffsetTons = (totalEnergyKwh * EMISSION_FACTOR) / 1000;
       
-      // Calculate a simple valuation based on energy generated
-      // This is a placeholder - in production, use actual valuation data
-      const valuation = Math.round(totalEnergyKwh * 0.5); // $0.50 per kWh as placeholder
+      // Use sites_valuation from database, fallback to calculated if null
+      const valuation = parseFloat(row.sites_valuation) || Math.round(totalEnergyKwh * 0.5);
       
       // Calculate APY based on category (placeholder values)
       const apyRanges = {
