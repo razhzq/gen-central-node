@@ -1,6 +1,7 @@
 const express = require('express');
 const { registerNodeCtrl } = require('../components/controller/node.controller');
 const { receiveHourlyTelemetryCtrl } = require('../components/controller/telemetry.controller');
+const { runMigrationCtrl, databaseHealthCtrl } = require('../components/controller/core.controller');
 const {
   getLocationsCtrl,
   getLocationMetricsCtrl,
@@ -10,14 +11,21 @@ const {
   getEfficiencyCtrl,
   getNetworkStatsCtrl,
   getNetworkGrowthCtrl,
+  getInvestmentCategoriesCtrl,
+  getInvestmentAssetsByCategoryCtrl,
+  getInvestmentAssetDetailsCtrl,
 } = require('../components/controller/api.controller');
 
 const coreRouter = express.Router();
 
-// Health check endpoint
+// Health check endpoints
 coreRouter.get('/api/health', (req, res) => {
   res.json({ status: 'ok', message: 'Central Node API is running' });
 });
+coreRouter.get('/api/health/database', databaseHealthCtrl);
+
+// Migration endpoint (for development/admin use)
+coreRouter.post('/api/admin/migrate/:migrationNumber', runMigrationCtrl);
 
 // Telemetry endpoints
 coreRouter.post('/api/telemetry/hourly', receiveHourlyTelemetryCtrl);
@@ -33,6 +41,11 @@ coreRouter.get('/api/locations/:locationId/efficiency', getEfficiencyCtrl);
 // Network-wide statistics endpoints
 coreRouter.get('/api/network/stats', getNetworkStatsCtrl);
 coreRouter.get('/api/network/growth', getNetworkGrowthCtrl);
+
+// Investment API endpoints
+coreRouter.get('/api/invest/categories', getInvestmentCategoriesCtrl);
+coreRouter.get('/api/invest/categories/:category/assets', getInvestmentAssetsByCategoryCtrl);
+coreRouter.get('/api/invest/assets/:assetId', getInvestmentAssetDetailsCtrl);
 
 // Node registration
 coreRouter.post('/node/register', 

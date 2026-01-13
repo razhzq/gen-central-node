@@ -7,6 +7,7 @@ CREATE TABLE meters (
 
   asset_type meter_asset_type_enum NOT NULL,
   firmware_version TEXT,
+  meter_type TEXT, // TODO: add this later
 
   active BOOLEAN NOT NULL DEFAULT true,
   installed_at TIMESTAMP,
