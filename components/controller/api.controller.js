@@ -53,6 +53,105 @@ module.exports.getLocationsCtrl = async (req, res) => {
 };
 
 /**
+ * Get all locations with their metrics (peak power, total energy, devices, IoT pubkey)
+ */
+module.exports.getAllLocationsMetricsCtrl = async (req, res) => {
+  try {
+    // Get all sites with their active meters
+    const sitesRes = await query(
+      `SELECT 
+        s.id,
+        s.name,
+        s.location,
+        m.id as meter_id,
+        m.iot_pubkey
+       FROM sites s
+       LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
+       ORDER BY s.name, m.id`
+    );
+
+    // Group by site and collect meter IDs and IoT pubkeys
+    const sitesMap = {};
+    sitesRes.rows.forEach((row) => {
+      if (!sitesMap[row.id]) {
+        sitesMap[row.id] = {
+          site_id: row.id,
+          site_name: row.name,
+          location: row.location,
+          meter_ids: [],
+          iot_pubkey: null, // Will use first active meter's pubkey
+        };
+      }
+      if (row.meter_id) {
+        sitesMap[row.id].meter_ids.push(row.meter_id);
+        // Use first active meter's IoT pubkey (1 site = 1 pubkey)
+        if (!sitesMap[row.id].iot_pubkey && row.iot_pubkey) {
+          sitesMap[row.id].iot_pubkey = row.iot_pubkey;
+        }
+      }
+    });
+
+    const sites = Object.values(sitesMap);
+    const results = [];
+
+    // Get metrics for each site
+    for (const site of sites) {
+      if (site.meter_ids.length === 0) {
+        results.push({
+          site_id: site.site_id,
+          site_name: site.site_name,
+          location: site.location,
+          peak_power_kw: 0,
+          total_energy_kwh: 0,
+          devices: 0,
+          iot_pubkey: site.iot_pubkey,
+        });
+        continue;
+      }
+
+      // Get peak power (max power_total_w from latest batches)
+      const peakPowerRes = await query(
+        `SELECT MAX(tr.power_total_w) as peak_power_w
+         FROM telemetry_raw tr
+         JOIN telemetry_batches tb ON tr.batch_id = tb.id
+         WHERE tb.meter_id = ANY($1::uuid[])
+         AND tb.status = 'VALIDATED'`,
+        [site.meter_ids]
+      );
+
+      // Get total energy (latest energy_total_wh)
+      const totalEnergyRes = await query(
+        `SELECT tr.energy_total_wh
+         FROM telemetry_raw tr
+         JOIN telemetry_batches tb ON tr.batch_id = tb.id
+         WHERE tb.meter_id = ANY($1::uuid[])
+         ORDER BY tb.interval_end DESC
+         LIMIT 1`,
+        [site.meter_ids]
+      );
+
+      const peakPowerKw = (peakPowerRes.rows[0]?.peak_power_w || 0) / 1000;
+      const totalEnergyKwh = (totalEnergyRes.rows[0]?.energy_total_wh || 0) / 1000;
+
+      results.push({
+        site_id: site.site_id,
+        site_name: site.site_name,
+        location: site.location,
+        peak_power_kw: parseFloat(peakPowerKw.toFixed(2)),
+        total_energy_kwh: parseFloat(totalEnergyKwh.toFixed(2)),
+        devices: site.meter_ids.length,
+        iot_pubkey: site.iot_pubkey,
+      });
+    }
+
+    res.json(results);
+  } catch (err) {
+    console.error('[API] Error getting all locations metrics:', err);
+    res.status(500).json({ error: 'Failed to fetch all locations metrics', message: err.message });
+  }
+};
+
+/**
  * Get location metrics (peak power, total energy, devices)
  */
 module.exports.getLocationMetricsCtrl = async (req, res) => {
@@ -614,7 +713,7 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
     const { assetId } = req.params;
     const EMISSION_FACTOR = 0.71;
 
-    // Get site details
+    // Get site details with IoT pubkey
     const siteRes = await query(
       `SELECT 
         s.id,
@@ -622,7 +721,8 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
         s.location,
         s.category,
         s.timezone,
-        COUNT(DISTINCT m.id) as meter_count
+        COUNT(DISTINCT m.id) as meter_count,
+        MAX(m.iot_pubkey) as iot_pubkey
        FROM sites s
        LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
        WHERE s.id = $1
@@ -701,6 +801,7 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
       totalEnergyMwh: parseFloat((totalEnergyKwh / 1000).toFixed(2)),
       co2OffsetTons: parseFloat(co2OffsetTons.toFixed(2)),
       activeMeters: parseInt(site.meter_count) || 0,
+      iotPubkey: site.iot_pubkey || null,
       lastUpdated: metrics.latest_timestamp || new Date().toISOString(),
       dailyPerformance: dailyPerformance,
     });

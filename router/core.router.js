@@ -4,6 +4,7 @@ const { receiveHourlyTelemetryCtrl } = require('../components/controller/telemet
 const { runMigrationCtrl, databaseHealthCtrl } = require('../components/controller/core.controller');
 const {
   getLocationsCtrl,
+  getAllLocationsMetricsCtrl,
   getLocationMetricsCtrl,
   getPowerDataCtrl,
   getNetFlowCtrl,
@@ -32,6 +33,7 @@ coreRouter.post('/api/telemetry/hourly', receiveHourlyTelemetryCtrl);
 
 // Frontend API endpoints
 coreRouter.get('/api/locations', getLocationsCtrl);
+coreRouter.get('/api/locations/metrics', getAllLocationsMetricsCtrl);
 coreRouter.get('/api/locations/:locationId/metrics', getLocationMetricsCtrl);
 coreRouter.get('/api/locations/:locationId/power', getPowerDataCtrl);
 coreRouter.get('/api/locations/:locationId/net-flow', getNetFlowCtrl);
