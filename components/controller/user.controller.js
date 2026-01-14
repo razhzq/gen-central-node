@@ -314,3 +314,99 @@ module.exports.getUserYieldHistoryCtrl = async (req, res) => {
     res.status(500).json({ error: 'Failed to get yield history', message: err.message });
   }
 };
+
+/**
+ * Record investment transaction
+ * POST /api/users/:walletAddress/investments
+ * Body: { category, amountUsd, tokenAmount, txHash }
+ */
+module.exports.recordInvestmentCtrl = async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    const { category, amountUsd, tokenAmount, txHash } = req.body;
+
+    if (!category || !amountUsd || !txHash) {
+      return res.status(400).json({ 
+        error: 'Category, amountUsd, and txHash are required' 
+      });
+    }
+
+    // Get or create user
+    let user = await query(
+      `SELECT id FROM users WHERE wallet_address = $1`,
+      [walletAddress]
+    );
+
+    if (user.rows.length === 0) {
+      // Create user if doesn't exist
+      user = await query(
+        `INSERT INTO users (wallet_address, email, kyc_status)
+         VALUES ($1, $2, 'unverified')
+         RETURNING id`,
+        [walletAddress, `${walletAddress.substring(0, 8)}@temp.com`]
+      );
+    }
+
+    const userId = user.rows[0].id;
+
+    // Get site_id for the category (assuming first site of category)
+    const siteResult = await query(
+      `SELECT id FROM sites WHERE category = $1 LIMIT 1`,
+      [category]
+    );
+
+    const siteId = siteResult.rows.length > 0 ? siteResult.rows[0].id : null;
+
+    // Start transaction
+    await query('BEGIN');
+
+    try {
+      // 1. Insert transaction record
+      await query(
+        `INSERT INTO user_transactions 
+         (user_id, transaction_type, asset_category, amount_usd, status, tx_hash)
+         VALUES ($1, 'BUY', $2, $3, 'COMPLETED', $4)`,
+        [userId, category, amountUsd, txHash]
+      );
+
+      // 2. Update or insert user_investments
+      if (siteId) {
+        await query(
+          `INSERT INTO user_investments 
+           (user_id, asset_category, site_id, amount_usd, token_amount)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (user_id, site_id) 
+           DO UPDATE SET 
+             amount_usd = user_investments.amount_usd + $4,
+             token_amount = COALESCE(user_investments.token_amount, 0) + $5`,
+          [userId, category, siteId, amountUsd, tokenAmount || amountUsd]
+        );
+      } else {
+        // If no site found, create a generic investment record
+        await query(
+          `INSERT INTO user_investments 
+           (user_id, asset_category, amount_usd, token_amount)
+           VALUES ($1, $2, $3, $4)`,
+          [userId, category, amountUsd, tokenAmount || amountUsd]
+        );
+      }
+
+      await query('COMMIT');
+
+      res.json({ 
+        success: true, 
+        message: 'Investment recorded successfully',
+        txHash 
+      });
+    } catch (err) {
+      await query('ROLLBACK');
+      throw err;
+    }
+  } catch (err) {
+    console.error('[USER] Error recording investment:', err);
+    res.status(500).json({ 
+      error: 'Failed to record investment', 
+      message: err.message 
+    });
+  }
+};

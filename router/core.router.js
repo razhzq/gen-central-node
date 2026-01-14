@@ -23,7 +23,12 @@ const {
   getUserHoldingsCtrl,
   getUserTransactionsCtrl,
   getUserYieldHistoryCtrl,
+  recordInvestmentCtrl,
 } = require('../components/controller/user.controller');
+const {
+  checkAndMintUSDCCtrl,
+  getUSDCBalanceCtrl,
+} = require('../components/controller/usdc.controller');
 
 const coreRouter = express.Router();
 
@@ -64,6 +69,11 @@ coreRouter.get('/api/users/:walletAddress/portfolio', getUserPortfolioCtrl);
 coreRouter.get('/api/users/:walletAddress/holdings', getUserHoldingsCtrl);
 coreRouter.get('/api/users/:walletAddress/transactions', getUserTransactionsCtrl);
 coreRouter.get('/api/users/:walletAddress/yield-history', getUserYieldHistoryCtrl);
+coreRouter.post('/api/users/:walletAddress/investments', recordInvestmentCtrl);
+
+// USDC endpoints
+coreRouter.post('/api/usdc/:walletAddress/check-and-mint', checkAndMintUSDCCtrl);
+coreRouter.get('/api/usdc/:walletAddress/balance', getUSDCBalanceCtrl);
 
 // Node registration
 coreRouter.post('/node/register', 
