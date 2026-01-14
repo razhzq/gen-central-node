@@ -16,6 +16,14 @@ const {
   getInvestmentAssetsByCategoryCtrl,
   getInvestmentAssetDetailsCtrl,
 } = require('../components/controller/api.controller');
+const {
+  createOrUpdateUserCtrl,
+  getUserProfileCtrl,
+  getUserPortfolioCtrl,
+  getUserHoldingsCtrl,
+  getUserTransactionsCtrl,
+  getUserYieldHistoryCtrl,
+} = require('../components/controller/user.controller');
 
 const coreRouter = express.Router();
 
@@ -48,6 +56,14 @@ coreRouter.get('/api/network/growth', getNetworkGrowthCtrl);
 coreRouter.get('/api/invest/categories', getInvestmentCategoriesCtrl);
 coreRouter.get('/api/invest/categories/:category/assets', getInvestmentAssetsByCategoryCtrl);
 coreRouter.get('/api/invest/assets/:assetId', getInvestmentAssetDetailsCtrl);
+
+// User/Profile API endpoints
+coreRouter.post('/api/users', createOrUpdateUserCtrl);
+coreRouter.get('/api/users/:walletAddress', getUserProfileCtrl);
+coreRouter.get('/api/users/:walletAddress/portfolio', getUserPortfolioCtrl);
+coreRouter.get('/api/users/:walletAddress/holdings', getUserHoldingsCtrl);
+coreRouter.get('/api/users/:walletAddress/transactions', getUserTransactionsCtrl);
+coreRouter.get('/api/users/:walletAddress/yield-history', getUserYieldHistoryCtrl);
 
 // Node registration
 coreRouter.post('/node/register', 
