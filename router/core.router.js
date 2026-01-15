@@ -23,6 +23,7 @@ const {
   getUserHoldingsCtrl,
   getUserTransactionsCtrl,
   getUserYieldHistoryCtrl,
+  getAssetActivityCtrl,
   recordInvestmentCtrl,
 } = require('../components/controller/user.controller');
 const {
@@ -69,6 +70,7 @@ coreRouter.get('/api/users/:walletAddress/portfolio', getUserPortfolioCtrl);
 coreRouter.get('/api/users/:walletAddress/holdings', getUserHoldingsCtrl);
 coreRouter.get('/api/users/:walletAddress/transactions', getUserTransactionsCtrl);
 coreRouter.get('/api/users/:walletAddress/yield-history', getUserYieldHistoryCtrl);
+coreRouter.get('/api/users/:walletAddress/asset-activity/:assetSymbol', getAssetActivityCtrl);
 coreRouter.post('/api/users/:walletAddress/investments', recordInvestmentCtrl);
 
 // USDC endpoints

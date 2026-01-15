@@ -318,6 +318,135 @@ module.exports.getUserYieldHistoryCtrl = async (req, res) => {
  * POST /api/users/:walletAddress/investments
  * Body: { category, amountUsd, tokenAmount, txHash }
  */
+/**
+ * Get asset-specific activity log
+ * GET /api/users/:walletAddress/asset-activity/:assetSymbol
+ */
+module.exports.getAssetActivityCtrl = async (req, res) => {
+  try {
+    const { walletAddress, assetSymbol } = req.params;
+    const limit = parseInt(req.query.limit) || 50;
+
+    // Map frontend category to database enum
+    const categoryMapping = {
+      "GENX-SOLAR": "SOLAR",
+      "GENX-EV": "EV",
+      "GENX-EE": "EE",
+    };
+    
+    const dbCategory = categoryMapping[assetSymbol];
+    if (!dbCategory) {
+      return res.status(400).json({ error: 'Invalid asset symbol' });
+    }
+
+    // Get user
+    const userResult = await query(
+      `SELECT id FROM users WHERE wallet_address = $1`,
+      [walletAddress]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userId = userResult.rows[0].id;
+
+    // Get asset-specific transactions
+    const result = await query(
+      `SELECT 
+        transaction_type as type,
+        amount_usd,
+        status,
+        tx_hash,
+        created_at
+       FROM user_transactions
+       WHERE user_id = $1 
+         AND asset_category = $2
+       ORDER BY created_at DESC
+       LIMIT $3`,
+      [userId, dbCategory, limit]
+    );
+
+    // Get user's total holdings for this asset
+    const holdingsResult = await query(
+      `SELECT 
+        SUM(token_amount) as total_units,
+        SUM(amount_usd) as total_invested
+       FROM user_investments
+       WHERE user_id = $1 
+         AND asset_category = $2`,
+      [userId, dbCategory]
+    );
+
+    const totalUnits = holdingsResult.rows[0]?.total_units || 0;
+    const totalInvested = holdingsResult.rows[0]?.total_invested || 0;
+
+    // Format activity logs
+    const activityLogs = result.rows.map((row) => {
+      const date = new Date(row.created_at);
+      const formattedDate = date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      // Map transaction type to activity name
+      const activityNames = {
+        'BUY': 'Subscribe',
+        'SELL': 'Redeem',
+        'YIELD': 'Yield Distribution',
+      };
+
+      const activity = activityNames[row.type] || row.type;
+      const amountUsd = parseFloat(row.amount_usd);
+      
+      // Calculate units (assuming 1 token = 1 USD)
+      const units = amountUsd;
+
+      return {
+        date: formattedDate,
+        activity: activity,
+        amount: row.type === 'BUY' 
+          ? `-${amountUsd.toFixed(2)} USDC` 
+          : row.type === 'YIELD'
+          ? `+${amountUsd.toFixed(2)} USDC`
+          : `${amountUsd.toFixed(2)} USDC`,
+        units: row.type === 'BUY' || row.type === 'SELL'
+          ? `${units.toFixed(2)} ${assetSymbol}`
+          : '-',
+        status: row.status === 'COMPLETED' ? 'Completed' : row.status,
+        tx: row.tx_hash,
+        info: false,
+      };
+    });
+
+    // Add "Portfolio Active" status if user has holdings
+    if (totalUnits > 0 && activityLogs.length > 0) {
+      activityLogs.splice(1, 0, {
+        date: activityLogs[0].date,
+        activity: 'Portfolio Active',
+        amount: '-',
+        units: `${parseFloat(totalUnits).toFixed(2)} ${assetSymbol}`,
+        status: 'Active',
+        tx: null,
+        info: true,
+      });
+    }
+
+    res.json(activityLogs);
+  } catch (err) {
+    console.error('[USER] Error getting asset activity:', err);
+    res.status(500).json({ error: 'Failed to get asset activity', message: err.message });
+  }
+};
+
+/**
+ * Record investment transaction
+ * POST /api/users/:walletAddress/investments
+ * Body: { category, amountUsd, tokenAmount, txHash }
+ */
 module.exports.recordInvestmentCtrl = async (req, res) => {
   try {
     const { walletAddress } = req.params;

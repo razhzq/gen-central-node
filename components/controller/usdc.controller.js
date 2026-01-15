@@ -1,4 +1,5 @@
 const { ethers } = require('ethers');
+const { query } = require('../../db');
 
 // Load contract ABIs
 const MockUSDC_ABI = [
@@ -65,6 +66,44 @@ const checkAndMintUSDCCtrl = async (req, res) => {
       // Get new balance
       const newBalance = await usdcContract.balanceOf(walletAddress);
       const newBalanceFormatted = ethers.formatUnits(newBalance, 6);
+
+      // Record USDC mint as DEPOSIT transaction in database
+      try {
+        // Get or create user
+        let userResult = await query(
+          `SELECT id FROM users WHERE wallet_address = $1`,
+          [walletAddress]
+        );
+
+        let userId;
+        if (userResult.rows.length === 0) {
+          // Create user if doesn't exist
+          const newUser = await query(
+            `INSERT INTO users (wallet_address, email, available_balance)
+             VALUES ($1, $2, 0.00)
+             ON CONFLICT (email) DO NOTHING
+             RETURNING id`,
+            [walletAddress, `${walletAddress.substring(0, 8)}@temp.com`]
+          );
+          userId = newUser.rows[0]?.id;
+        } else {
+          userId = userResult.rows[0].id;
+        }
+
+        if (userId) {
+          // Insert DEPOSIT transaction
+          await query(
+            `INSERT INTO user_transactions 
+             (user_id, transaction_type, amount_usd, status, tx_hash, notes)
+             VALUES ($1, 'DEPOSIT', 10000.00, 'COMPLETED', $2, 'Auto-minted test USDC for new user')`,
+            [userId, tx.hash]
+          );
+          console.log('[USDC] Recorded mint as DEPOSIT transaction');
+        }
+      } catch (dbError) {
+        console.error('[USDC] Failed to record mint in database:', dbError);
+        // Don't fail the whole request if DB insert fails
+      }
 
       return res.json({
         success: true,
