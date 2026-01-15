@@ -227,7 +227,7 @@ module.exports.getUserTransactionsCtrl = async (req, res) => {
         status,
         tx_hash,
         notes,
-        created_at as date
+        created_at
        FROM user_transactions
        WHERE user_id = $1
        ORDER BY created_at DESC
@@ -236,16 +236,27 @@ module.exports.getUserTransactionsCtrl = async (req, res) => {
     );
 
     // Format transactions
-    const transactions = transactionsResult.rows.map((row) => ({
-      id: row.id,
-      date: row.date,
-      type: row.type,
-      amount: parseFloat(row.amount),
-      asset: row.asset_category ? `GENX-${row.asset_category}` : 'USD',
-      status: row.status,
-      tx: row.tx_hash || null,
-      notes: row.notes,
-    }));
+    const transactions = transactionsResult.rows.map((row) => {
+      const date = new Date(row.created_at);
+      const formattedDate = date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+
+      return {
+        id: row.id,
+        date: formattedDate,
+        type: row.type,
+        amount: parseFloat(row.amount),
+        asset: row.asset_category ? `GENX-${row.asset_category}` : 'USD',
+        status: row.status,
+        tx: row.tx_hash || null,
+        notes: row.notes,
+      };
+    });
 
     res.json(transactions);
   } catch (err) {
