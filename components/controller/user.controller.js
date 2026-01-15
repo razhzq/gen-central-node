@@ -13,36 +13,23 @@ module.exports.createOrUpdateUserCtrl = async (req, res) => {
       return res.status(400).json({ error: 'Email and wallet address are required' });
     }
 
-    // Check if user already exists
-    const existingUser = await query(
-      `SELECT * FROM users WHERE wallet_address = $1 OR email = $2`,
-      [walletAddress, email]
+    // Use UPSERT (INSERT ... ON CONFLICT DO UPDATE)
+    // This handles both creation and updates atomically
+    const user = await query(
+      `INSERT INTO users (email, wallet_address, available_balance, created_at, updated_at)
+       VALUES ($1, $2, 0.00, now(), now())
+       ON CONFLICT (email) 
+       DO UPDATE SET 
+         wallet_address = EXCLUDED.wallet_address,
+         updated_at = now()
+       RETURNING *`,
+      [email, walletAddress]
     );
-
-    let user;
-    if (existingUser.rows.length > 0) {
-      // Update existing user
-      user = await query(
-        `UPDATE users 
-         SET email = $1, wallet_address = $2, updated_at = now()
-         WHERE id = $3
-         RETURNING *`,
-        [email, walletAddress, existingUser.rows[0].id]
-      );
-    } else {
-      // Create new user
-      user = await query(
-        `INSERT INTO users (email, wallet_address, available_balance)
-         VALUES ($1, $2, 0.00)
-         RETURNING *`,
-        [email, walletAddress]
-      );
-    }
 
     res.json({ 
       success: true, 
       user: user.rows[0],
-      message: existingUser.rows.length > 0 ? 'User updated' : 'User created'
+      message: 'User profile saved'
     });
   } catch (err) {
     console.error('[USER] Error creating/updating user:', err);
