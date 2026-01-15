@@ -724,12 +724,13 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
         s.location,
         s.category,
         s.timezone,
+        s.sites_valuation,
         COUNT(DISTINCT m.id) as meter_count,
         MAX(m.iot_pubkey) as iot_pubkey
        FROM sites s
        LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
        WHERE s.id = $1
-       GROUP BY s.id, s.name, s.location, s.category, s.timezone`,
+       GROUP BY s.id, s.name, s.location, s.category, s.timezone, s.sites_valuation`,
       [assetId]
     );
 
@@ -756,7 +757,9 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
     const totalEnergyKwh = parseFloat(metrics.total_energy_kwh) || 0;
     const peakPowerKw = (parseFloat(metrics.peak_power_w) || 0) / 1000;
     const co2OffsetTons = (totalEnergyKwh * EMISSION_FACTOR) / 1000;
-    const valuation = Math.round(totalEnergyKwh * 0.5);
+    
+    // Use sites_valuation from database, fallback to calculated value if null
+    const valuation = parseFloat(site.sites_valuation) || Math.round(totalEnergyKwh * 0.5);
 
     // Get recent daily performance (last 30 days)
     const performanceRes = await query(
