@@ -14,13 +14,14 @@ module.exports.createOrUpdateUserCtrl = async (req, res) => {
     }
 
     // Use UPSERT (INSERT ... ON CONFLICT DO UPDATE)
-    // This handles both creation and updates atomically
+    // Use wallet_address as the conflict key since it's the primary identifier
+    // (all queries use wallet_address to fetch user data, not email)
     const user = await query(
       `INSERT INTO users (email, wallet_address, available_balance, created_at, updated_at)
        VALUES ($1, $2, 0.00, now(), now())
-       ON CONFLICT (email) 
+       ON CONFLICT (wallet_address) 
        DO UPDATE SET 
-         wallet_address = EXCLUDED.wallet_address,
+         email = EXCLUDED.email,
          updated_at = now()
        RETURNING *`,
       [email, walletAddress]
@@ -466,9 +467,12 @@ module.exports.recordInvestmentCtrl = async (req, res) => {
 
     if (user.rows.length === 0) {
       // Create user if doesn't exist
+      // Use wallet_address as conflict key and update if exists
       user = await query(
-        `INSERT INTO users (wallet_address, email, kyc_status)
-         VALUES ($1, $2, 'unverified')
+        `INSERT INTO users (wallet_address, email, kyc_status, available_balance, created_at, updated_at)
+         VALUES ($1, $2, 'unverified', 0.00, now(), now())
+         ON CONFLICT (wallet_address) DO UPDATE
+         SET email = EXCLUDED.email, updated_at = now()
          RETURNING id`,
         [walletAddress, `${walletAddress.substring(0, 8)}@temp.com`]
       );
