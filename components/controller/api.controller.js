@@ -167,8 +167,14 @@ module.exports.getLocationMetricsCtrl = async (req, res) => {
   try {
     const { locationId } = req.params;
 
-    // Get site info
-    const siteRes = await query('SELECT id, name, location FROM sites WHERE id = $1', [locationId]);
+    // Get site info with category and organization
+    const siteRes = await query(
+      `SELECT s.id, s.name, s.location, s.category, o.name AS organization_name
+       FROM sites s
+       LEFT JOIN organizations o ON s.organization_id = o.id
+       WHERE s.id = $1`,
+      [locationId]
+    );
     if (siteRes.rowCount === 0) {
       return res.status(404).json({ error: 'Location not found' });
     }
@@ -187,6 +193,8 @@ module.exports.getLocationMetricsCtrl = async (req, res) => {
         site_id: site.id,
         site_name: site.name,
         location: site.location,
+        category: site.category,
+        organization_name: site.organization_name,
         peak_power_kw: 0,
         total_energy_kwh: 0,
         devices: 0,
@@ -221,6 +229,8 @@ module.exports.getLocationMetricsCtrl = async (req, res) => {
       site_id: site.id,
       site_name: site.name,
       location: site.location,
+      category: site.category,
+      organization_name: site.organization_name,
       peak_power_kw: parseFloat(peakPowerKw.toFixed(2)),
       total_energy_kwh: parseFloat(totalEnergyKwh.toFixed(2)),
       devices: meterIds.length,
