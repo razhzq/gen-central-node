@@ -57,15 +57,18 @@ module.exports.getLocationsCtrl = async (req, res) => {
  */
 module.exports.getAllLocationsMetricsCtrl = async (req, res) => {
   try {
-    // Get all sites with their active meters
+    // Get all sites with their active meters, including category and organization
     const sitesRes = await query(
       `SELECT 
         s.id,
         s.name,
         s.location,
+        s.category,
+        o.name as organization_name,
         m.id as meter_id,
         m.iot_pubkey
        FROM sites s
+       LEFT JOIN organizations o ON s.organization_id = o.id
        LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
        ORDER BY s.name, m.id`
     );
@@ -78,6 +81,8 @@ module.exports.getAllLocationsMetricsCtrl = async (req, res) => {
           site_id: row.id,
           site_name: row.name,
           location: row.location,
+          category: row.category,
+          organization_name: row.organization_name,
           meter_ids: [],
           iot_pubkey: null, // Will use first active meter's pubkey
         };
@@ -101,6 +106,8 @@ module.exports.getAllLocationsMetricsCtrl = async (req, res) => {
           site_id: site.site_id,
           site_name: site.site_name,
           location: site.location,
+          category: site.category,
+          organization_name: site.organization_name,
           peak_power_kw: 0,
           total_energy_kwh: 0,
           devices: 0,
@@ -137,6 +144,8 @@ module.exports.getAllLocationsMetricsCtrl = async (req, res) => {
         site_id: site.site_id,
         site_name: site.site_name,
         location: site.location,
+        category: site.category,
+        organization_name: site.organization_name,
         peak_power_kw: parseFloat(peakPowerKw.toFixed(2)),
         total_energy_kwh: parseFloat(totalEnergyKwh.toFixed(2)),
         devices: site.meter_ids.length,
