@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const path = require('path');
 const coreRouter = require('./router/core.router');
 
 
@@ -13,6 +14,10 @@ app.use(
       origin: "*",
     })
   );
+
+// Serve uploaded files (receipts)
+const UPLOADS_DIR = process.env.UPLOAD_DIR || './uploads';
+app.use('/uploads', express.static(path.resolve(UPLOADS_DIR)));
 
 app.use("/", coreRouter);
 

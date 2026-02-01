@@ -1,4 +1,12 @@
 const { query } = require('../../db');
+const path = require('path');
+const fs = require('fs');
+
+// Ensure uploads directory exists
+const UPLOADS_DIR = process.env.UPLOAD_DIR || './uploads/receipts';
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
 
 /**
  * Create or update user profile
@@ -537,6 +545,120 @@ module.exports.recordInvestmentCtrl = async (req, res) => {
     console.error('[USER] Error recording investment:', err);
     res.status(500).json({ 
       error: 'Failed to record investment', 
+      message: err.message 
+    });
+  }
+};
+
+/**
+ * Submit deposit request with receipt
+ * POST /api/users/:walletAddress/deposit-request
+ * Body (multipart/form-data): { amount, receipt (file) }
+ */
+module.exports.submitDepositRequestCtrl = async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    const { amount } = req.body;
+
+    if (!amount) {
+      return res.status(400).json({ error: 'Amount is required' });
+    }
+
+    const amountNum = parseFloat(amount);
+    if (isNaN(amountNum) || amountNum <= 0) {
+      return res.status(400).json({ error: 'Amount must be a positive number' });
+    }
+
+    // Check if file was uploaded
+    if (!req.file) {
+      return res.status(400).json({ error: 'Receipt file is required' });
+    }
+
+    // Get user
+    const userResult = await query(
+      `SELECT id FROM users WHERE wallet_address = $1`,
+      [walletAddress]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userId = userResult.rows[0].id;
+    const receiptPath = req.file.path;
+
+    // Create deposit request
+    const result = await query(
+      `INSERT INTO deposit_requests 
+       (user_id, amount_usd, receipt_path, status)
+       VALUES ($1, $2, $3, 'pending')
+       RETURNING *`,
+      [userId, amountNum, receiptPath]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Deposit request submitted successfully. Pending admin approval.',
+      request: {
+        id: result.rows[0].id,
+        amount: amountNum,
+        status: 'pending',
+        created_at: result.rows[0].created_at,
+      }
+    });
+  } catch (err) {
+    console.error('[USER] Error submitting deposit request:', err);
+    res.status(500).json({ 
+      error: 'Failed to submit deposit request', 
+      message: err.message 
+    });
+  }
+};
+
+/**
+ * Get user's deposit requests
+ * GET /api/users/:walletAddress/deposit-requests
+ */
+module.exports.getDepositRequestsCtrl = async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    const limit = parseInt(req.query.limit) || 20;
+    const offset = parseInt(req.query.offset) || 0;
+
+    // Get user
+    const userResult = await query(
+      `SELECT id FROM users WHERE wallet_address = $1`,
+      [walletAddress]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const userId = userResult.rows[0].id;
+
+    const result = await query(
+      `SELECT 
+        id, amount_usd, status, rejection_reason, created_at, reviewed_at
+       FROM deposit_requests
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, limit, offset]
+    );
+
+    res.json(result.rows.map(row => ({
+      id: row.id,
+      amount: parseFloat(row.amount_usd),
+      status: row.status,
+      rejectionReason: row.rejection_reason,
+      createdAt: row.created_at,
+      reviewedAt: row.reviewed_at,
+    })));
+  } catch (err) {
+    console.error('[USER] Error getting deposit requests:', err);
+    res.status(500).json({ 
+      error: 'Failed to get deposit requests', 
       message: err.message 
     });
   }
