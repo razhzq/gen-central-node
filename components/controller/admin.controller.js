@@ -1,6 +1,7 @@
 const { query, pool } = require('../../db');
 const path = require('path');
 const fs = require('fs');
+const { v4: uuidv4 } = require('uuid');
 
 // Ensure uploads directory exists
 const UPLOADS_DIR = process.env.UPLOAD_DIR || './uploads/receipts';
@@ -303,13 +304,15 @@ module.exports.createAssetRequestCtrl = async (req, res) => {
 
     // If maker is checker, create as active; otherwise pending
     const status = req.user.user_type === 'checker' ? 'active' : 'pending';
+    const siteId = uuidv4();
 
     const result = await query(
       `INSERT INTO sites 
-       (name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+       (id, name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
        RETURNING *`,
       [
+        siteId,
         name,
         location,
         timezone || 'UTC',
@@ -356,12 +359,15 @@ module.exports.createAssetCtrl = async (req, res) => {
       });
     }
 
+    const siteId = uuidv4();
+
     const result = await query(
       `INSERT INTO sites 
-       (name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, NOW())
+       (id, name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NOW())
        RETURNING *`,
       [
+        siteId,
         name,
         location,
         timezone || 'UTC',
