@@ -281,11 +281,21 @@ module.exports.getAllAssetsCtrl = async (req, res) => {
 /**
  * Create asset request (Maker) - creates site with status 'pending'
  * POST /api/admin/assets/request
- * Body: { name, location, timezone, category, valuation, organizationId? }
+ * Body: { name, location, timezone, category, valuation, organizationId?, ...extended fields }
  */
 module.exports.createAssetRequestCtrl = async (req, res) => {
   try {
-    const { name, location, timezone, category, valuation, organizationId } = req.body;
+    const { 
+      name, location, timezone, category, valuation, organizationId,
+      // Extended fields
+      description, imageUrl, assetType, portfolioToken, tokenPrice,
+      revenueModel, estimatedAnnualIncome, contractTerm,
+      installationType, technologyType, numPanels, peakPowerKw, 
+      peakSunHours, expectedAnnualOutput,
+      tariffRate, tariffCurrency, tariffEscalation,
+      yieldInvestorPct, yieldMaintenancePct, yieldPlatformPct, yieldTreasuryPct,
+      showInInvest, showInConsole
+    } = req.body;
     const creatorId = req.user.id;
 
     if (!name || !location || !category) {
@@ -308,19 +318,26 @@ module.exports.createAssetRequestCtrl = async (req, res) => {
 
     const result = await query(
       `INSERT INTO sites 
-       (id, name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+       (id, name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at,
+        description, image_url, asset_type, portfolio_token, token_price,
+        revenue_model, estimated_annual_income, contract_term,
+        installation_type, technology_type, num_panels, peak_power_kw, peak_sun_hours, expected_annual_output,
+        tariff_rate, tariff_currency, tariff_escalation,
+        yield_investor_pct, yield_maintenance_pct, yield_platform_pct, yield_treasury_pct,
+        show_in_invest, show_in_console)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(),
+        $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
        RETURNING *`,
       [
-        siteId,
-        name,
-        location,
-        timezone || 'UTC',
-        category.toUpperCase(),
-        valuation || 0,
-        organizationId || null,
-        status,
-        creatorId,
+        siteId, name, location, timezone || 'UTC', category.toUpperCase(), 
+        valuation || 0, organizationId || null, status, creatorId,
+        description || null, imageUrl || null, assetType || null, portfolioToken || null, tokenPrice || 1,
+        revenueModel || null, estimatedAnnualIncome || null, contractTerm || null,
+        installationType || null, technologyType || null, numPanels || null, peakPowerKw || null, 
+        peakSunHours || 4.5, expectedAnnualOutput || null,
+        tariffRate || null, tariffCurrency || 'USD', tariffEscalation || null,
+        yieldInvestorPct || 60, yieldMaintenancePct || 10, yieldPlatformPct || 10, yieldTreasuryPct || 20,
+        showInInvest !== false, showInConsole === true
       ]
     );
 
@@ -338,11 +355,21 @@ module.exports.createAssetRequestCtrl = async (req, res) => {
 /**
  * Create asset directly (Checker only) - creates site with status 'active'
  * POST /api/admin/assets
- * Body: { name, location, timezone, category, valuation, organizationId? }
+ * Body: { name, location, timezone, category, valuation, organizationId?, ...extended fields }
  */
 module.exports.createAssetCtrl = async (req, res) => {
   try {
-    const { name, location, timezone, category, valuation, organizationId } = req.body;
+    const { 
+      name, location, timezone, category, valuation, organizationId,
+      // Extended fields
+      description, imageUrl, assetType, portfolioToken, tokenPrice,
+      revenueModel, estimatedAnnualIncome, contractTerm,
+      installationType, technologyType, numPanels, peakPowerKw, 
+      peakSunHours, expectedAnnualOutput,
+      tariffRate, tariffCurrency, tariffEscalation,
+      yieldInvestorPct, yieldMaintenancePct, yieldPlatformPct, yieldTreasuryPct,
+      showInInvest, showInConsole
+    } = req.body;
     const creatorId = req.user.id;
 
     if (!name || !location || !category) {
@@ -363,18 +390,26 @@ module.exports.createAssetCtrl = async (req, res) => {
 
     const result = await query(
       `INSERT INTO sites 
-       (id, name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NOW())
+       (id, name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at,
+        description, image_url, asset_type, portfolio_token, token_price,
+        revenue_model, estimated_annual_income, contract_term,
+        installation_type, technology_type, num_panels, peak_power_kw, peak_sun_hours, expected_annual_output,
+        tariff_rate, tariff_currency, tariff_escalation,
+        yield_investor_pct, yield_maintenance_pct, yield_platform_pct, yield_treasury_pct,
+        show_in_invest, show_in_console)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NOW(),
+        $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
        RETURNING *`,
       [
-        siteId,
-        name,
-        location,
-        timezone || 'UTC',
-        category.toUpperCase(),
-        valuation || 0,
-        organizationId || null,
-        creatorId,
+        siteId, name, location, timezone || 'UTC', category.toUpperCase(), 
+        valuation || 0, organizationId || null, creatorId,
+        description || null, imageUrl || null, assetType || null, portfolioToken || null, tokenPrice || 1,
+        revenueModel || null, estimatedAnnualIncome || null, contractTerm || null,
+        installationType || null, technologyType || null, numPanels || null, peakPowerKw || null, 
+        peakSunHours || 4.5, expectedAnnualOutput || null,
+        tariffRate || null, tariffCurrency || 'USD', tariffEscalation || null,
+        yieldInvestorPct || 60, yieldMaintenancePct || 10, yieldPlatformPct || 10, yieldTreasuryPct || 20,
+        showInInvest !== false, showInConsole === true
       ]
     );
 
@@ -485,6 +520,60 @@ module.exports.updateAssetStatusCtrl = async (req, res) => {
   } catch (err) {
     console.error('[ADMIN] Error updating asset status:', err);
     res.status(500).json({ error: 'Failed to update asset status', message: err.message });
+  }
+};
+
+/**
+ * Update asset visibility (Checker only)
+ * PUT /api/admin/assets/:siteId/visibility
+ * Body: { showInInvest?: boolean, showInConsole?: boolean }
+ */
+module.exports.updateAssetVisibilityCtrl = async (req, res) => {
+  try {
+    const { siteId } = req.params;
+    const { showInInvest, showInConsole } = req.body;
+
+    // Build dynamic update query
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (typeof showInInvest === 'boolean') {
+      updates.push(`show_in_invest = $${paramIndex++}`);
+      values.push(showInInvest);
+    }
+
+    if (typeof showInConsole === 'boolean') {
+      updates.push(`show_in_console = $${paramIndex++}`);
+      values.push(showInConsole);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No visibility fields provided' });
+    }
+
+    values.push(siteId);
+
+    const result = await query(
+      `UPDATE sites 
+       SET ${updates.join(', ')}
+       WHERE id = $${paramIndex}
+       RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    res.json({ 
+      success: true, 
+      message: 'Asset visibility updated',
+      asset: result.rows[0] 
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error updating asset visibility:', err);
+    res.status(500).json({ error: 'Failed to update asset visibility', message: err.message });
   }
 };
 

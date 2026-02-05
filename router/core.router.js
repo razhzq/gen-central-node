@@ -46,6 +46,7 @@ const {
   approveAssetCtrl,
   rejectAssetCtrl,
   updateAssetStatusCtrl,
+  updateAssetVisibilityCtrl,
   getMyAssetRequestsCtrl,
   getAllUsersCtrl,
   updateUserTypeCtrl,
@@ -160,6 +161,7 @@ coreRouter.post('/api/admin/assets/:siteId/reject', requireChecker, rejectAssetC
 coreRouter.get('/api/admin/assets', requireChecker, getAllAssetsCtrl);
 coreRouter.post('/api/admin/assets', requireChecker, createAssetCtrl);
 coreRouter.put('/api/admin/assets/:siteId/status', requireChecker, updateAssetStatusCtrl);
+coreRouter.put('/api/admin/assets/:siteId/visibility', requireChecker, updateAssetVisibilityCtrl);
 
 // Asset request creation (Maker or Checker)
 coreRouter.post('/api/admin/assets/request', requireMakerOrChecker, createAssetRequestCtrl);

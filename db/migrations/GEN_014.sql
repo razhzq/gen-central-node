@@ -3,6 +3,9 @@
 -- Add user_type enum
 CREATE TYPE user_type_enum AS ENUM ('user', 'maker', 'checker');
 
+-- Make organization_id nullable for admin-created assets
+ALTER TABLE sites ALTER COLUMN organization_id DROP NOT NULL;
+
 -- Add user_type column to users table with default 'user'
 ALTER TABLE users ADD COLUMN user_type user_type_enum NOT NULL DEFAULT 'user';
 
