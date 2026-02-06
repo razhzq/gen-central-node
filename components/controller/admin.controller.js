@@ -524,6 +524,238 @@ module.exports.updateAssetStatusCtrl = async (req, res) => {
 };
 
 /**
+ * Get single asset by ID (Checker only)
+ * GET /api/admin/assets/:siteId
+ */
+module.exports.getAssetByIdCtrl = async (req, res) => {
+  try {
+    const { siteId } = req.params;
+
+    const result = await query(
+      `SELECT
+        s.id,
+        s.name,
+        s.location,
+        s.timezone,
+        s.category,
+        s.sites_valuation,
+        s.status,
+        s.created_at,
+        s.description,
+        s.image_url,
+        s.asset_type,
+        s.portfolio_token,
+        s.token_price,
+        s.revenue_model,
+        s.estimated_annual_income,
+        s.contract_term,
+        s.installation_type,
+        s.technology_type,
+        s.num_panels,
+        s.peak_power_kw,
+        s.peak_sun_hours,
+        s.expected_annual_output,
+        s.tariff_rate,
+        s.tariff_currency,
+        s.tariff_escalation,
+        s.yield_investor_pct,
+        s.yield_maintenance_pct,
+        s.yield_platform_pct,
+        s.yield_treasury_pct,
+        s.show_in_invest,
+        s.show_in_console,
+        o.name as organization_name,
+        creator.email as created_by_email,
+        creator.wallet_address as created_by_wallet
+       FROM sites s
+       LEFT JOIN organizations o ON s.organization_id = o.id
+       LEFT JOIN users creator ON s.created_by = creator.id
+       WHERE s.id = $1`,
+      [siteId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    res.json({ asset: result.rows[0] });
+  } catch (err) {
+    console.error('[ADMIN] Error getting asset:', err);
+    res.status(500).json({ error: 'Failed to get asset', message: err.message });
+  }
+};
+
+/**
+ * Update asset details (Checker only)
+ * PUT /api/admin/assets/:siteId
+ * Body: { name?, location?, timezone?, category?, valuation?, ...extended fields }
+ */
+module.exports.updateAssetCtrl = async (req, res) => {
+  try {
+    const { siteId } = req.params;
+    const {
+      name, location, timezone, category, valuation,
+      description, imageUrl, assetType, portfolioToken, tokenPrice,
+      revenueModel, estimatedAnnualIncome, contractTerm,
+      installationType, technologyType, numPanels, peakPowerKw,
+      peakSunHours, expectedAnnualOutput,
+      tariffRate, tariffCurrency, tariffEscalation,
+      yieldInvestorPct, yieldMaintenancePct, yieldPlatformPct, yieldTreasuryPct,
+      showInInvest, showInConsole
+    } = req.body;
+
+    // Build dynamic update query
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (name !== undefined) {
+      updates.push(`name = $${paramIndex++}`);
+      values.push(name);
+    }
+    if (location !== undefined) {
+      updates.push(`location = $${paramIndex++}`);
+      values.push(location);
+    }
+    if (timezone !== undefined) {
+      updates.push(`timezone = $${paramIndex++}`);
+      values.push(timezone);
+    }
+    if (category !== undefined) {
+      const validCategories = ['SOLAR', 'EV', 'EE'];
+      if (!validCategories.includes(category.toUpperCase())) {
+        return res.status(400).json({ error: 'Invalid category. Must be SOLAR, EV, or EE' });
+      }
+      updates.push(`category = $${paramIndex++}`);
+      values.push(category.toUpperCase());
+    }
+    if (valuation !== undefined) {
+      updates.push(`sites_valuation = $${paramIndex++}`);
+      values.push(valuation);
+    }
+    if (description !== undefined) {
+      updates.push(`description = $${paramIndex++}`);
+      values.push(description || null);
+    }
+    if (imageUrl !== undefined) {
+      updates.push(`image_url = $${paramIndex++}`);
+      values.push(imageUrl || null);
+    }
+    if (assetType !== undefined) {
+      updates.push(`asset_type = $${paramIndex++}`);
+      values.push(assetType || null);
+    }
+    if (portfolioToken !== undefined) {
+      updates.push(`portfolio_token = $${paramIndex++}`);
+      values.push(portfolioToken || null);
+    }
+    if (tokenPrice !== undefined) {
+      updates.push(`token_price = $${paramIndex++}`);
+      values.push(tokenPrice);
+    }
+    if (revenueModel !== undefined) {
+      updates.push(`revenue_model = $${paramIndex++}`);
+      values.push(revenueModel || null);
+    }
+    if (estimatedAnnualIncome !== undefined) {
+      updates.push(`estimated_annual_income = $${paramIndex++}`);
+      values.push(estimatedAnnualIncome || null);
+    }
+    if (contractTerm !== undefined) {
+      updates.push(`contract_term = $${paramIndex++}`);
+      values.push(contractTerm || null);
+    }
+    if (installationType !== undefined) {
+      updates.push(`installation_type = $${paramIndex++}`);
+      values.push(installationType || null);
+    }
+    if (technologyType !== undefined) {
+      updates.push(`technology_type = $${paramIndex++}`);
+      values.push(technologyType || null);
+    }
+    if (numPanels !== undefined) {
+      updates.push(`num_panels = $${paramIndex++}`);
+      values.push(numPanels || null);
+    }
+    if (peakPowerKw !== undefined) {
+      updates.push(`peak_power_kw = $${paramIndex++}`);
+      values.push(peakPowerKw || null);
+    }
+    if (peakSunHours !== undefined) {
+      updates.push(`peak_sun_hours = $${paramIndex++}`);
+      values.push(peakSunHours || null);
+    }
+    if (expectedAnnualOutput !== undefined) {
+      updates.push(`expected_annual_output = $${paramIndex++}`);
+      values.push(expectedAnnualOutput || null);
+    }
+    if (tariffRate !== undefined) {
+      updates.push(`tariff_rate = $${paramIndex++}`);
+      values.push(tariffRate || null);
+    }
+    if (tariffCurrency !== undefined) {
+      updates.push(`tariff_currency = $${paramIndex++}`);
+      values.push(tariffCurrency || 'MYR');
+    }
+    if (tariffEscalation !== undefined) {
+      updates.push(`tariff_escalation = $${paramIndex++}`);
+      values.push(tariffEscalation || null);
+    }
+    if (yieldInvestorPct !== undefined) {
+      updates.push(`yield_investor_pct = $${paramIndex++}`);
+      values.push(yieldInvestorPct);
+    }
+    if (yieldMaintenancePct !== undefined) {
+      updates.push(`yield_maintenance_pct = $${paramIndex++}`);
+      values.push(yieldMaintenancePct);
+    }
+    if (yieldPlatformPct !== undefined) {
+      updates.push(`yield_platform_pct = $${paramIndex++}`);
+      values.push(yieldPlatformPct);
+    }
+    if (yieldTreasuryPct !== undefined) {
+      updates.push(`yield_treasury_pct = $${paramIndex++}`);
+      values.push(yieldTreasuryPct);
+    }
+    if (showInInvest !== undefined) {
+      updates.push(`show_in_invest = $${paramIndex++}`);
+      values.push(showInInvest);
+    }
+    if (showInConsole !== undefined) {
+      updates.push(`show_in_console = $${paramIndex++}`);
+      values.push(showInConsole);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    values.push(siteId);
+
+    const result = await query(
+      `UPDATE sites
+       SET ${updates.join(', ')}, updated_at = NOW()
+       WHERE id = $${paramIndex}
+       RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Asset updated successfully',
+      asset: result.rows[0]
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error updating asset:', err);
+    res.status(500).json({ error: 'Failed to update asset', message: err.message });
+  }
+};
+
+/**
  * Update asset visibility (Checker only)
  * PUT /api/admin/assets/:siteId/visibility
  * Body: { showInInvest?: boolean, showInConsole?: boolean }

@@ -41,6 +41,8 @@ const {
   rejectDepositRequestCtrl,
   getAssetRequestsCtrl,
   getAllAssetsCtrl,
+  getAssetByIdCtrl,
+  updateAssetCtrl,
   createAssetRequestCtrl,
   createAssetCtrl,
   approveAssetCtrl,
@@ -160,6 +162,8 @@ coreRouter.post('/api/admin/assets/:siteId/reject', requireChecker, rejectAssetC
 // Asset management (Checker only)
 coreRouter.get('/api/admin/assets', requireChecker, getAllAssetsCtrl);
 coreRouter.post('/api/admin/assets', requireChecker, createAssetCtrl);
+coreRouter.get('/api/admin/assets/:siteId', requireChecker, getAssetByIdCtrl);
+coreRouter.put('/api/admin/assets/:siteId', requireChecker, updateAssetCtrl);
 coreRouter.put('/api/admin/assets/:siteId/status', requireChecker, updateAssetStatusCtrl);
 coreRouter.put('/api/admin/assets/:siteId/visibility', requireChecker, updateAssetVisibilityCtrl);
 
