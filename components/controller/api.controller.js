@@ -668,6 +668,7 @@ module.exports.getInvestmentAssetsByCategoryCtrl = async (req, res) => {
         s.location,
         s.category,
         s.sites_valuation,
+        s.estimated_annual_income,
         COUNT(DISTINCT m.id) as meter_count,
         COALESCE(MAX(latest_data.peak_power_w), 0) as peak_power_w,
         COALESCE(MAX(latest_data.total_energy_kwh), 0) as total_energy_kwh,
@@ -686,7 +687,7 @@ module.exports.getInvestmentAssetsByCategoryCtrl = async (req, res) => {
        WHERE UPPER(s.category::text) = UPPER($1)
          AND s.status = 'active'
          AND COALESCE(s.show_in_invest, true) = true
-       GROUP BY s.id, s.name, s.location, s.category, s.sites_valuation
+       GROUP BY s.id, s.name, s.location, s.category, s.sites_valuation, s.estimated_annual_income
        ORDER BY s.name`,
       [category]
     );
@@ -698,15 +699,21 @@ module.exports.getInvestmentAssetsByCategoryCtrl = async (req, res) => {
       
       // Use sites_valuation from database, fallback to calculated if null
       const valuation = parseFloat(row.sites_valuation) || Math.round(totalEnergyKwh * 0.5);
-      
-      // Calculate APY based on category (placeholder values)
-      const apyRanges = {
-        solar: { min: 10, max: 12 },
-        ev: { min: 6, max: 20 },
-        ee: { min: 8, max: 15 }
-      };
-      const apyRange = apyRanges[category.toLowerCase()] || { min: 8, max: 12 };
-      const apy = (apyRange.min + apyRange.max) / 2;
+      const estimatedAnnualIncome = row.estimated_annual_income != null ? parseFloat(row.estimated_annual_income) : null;
+
+      // APY = (estimated annual income / site valuation) * 100; fallback to category default if missing
+      let apy;
+      if (valuation > 0 && estimatedAnnualIncome != null && !Number.isNaN(estimatedAnnualIncome)) {
+        apy = parseFloat(((estimatedAnnualIncome / valuation) * 100).toFixed(2));
+      } else {
+        const apyRanges = {
+          solar: { min: 10, max: 12 },
+          ev: { min: 6, max: 20 },
+          ee: { min: 8, max: 15 }
+        };
+        const apyRange = apyRanges[category.toLowerCase()] || { min: 8, max: 12 };
+        apy = (apyRange.min + apyRange.max) / 2;
+      }
 
       return {
         id: row.id,
