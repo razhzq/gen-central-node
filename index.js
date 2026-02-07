@@ -8,7 +8,8 @@ const coreRouter = require('./router/core.router');
 const app = express();
 const port = process.env.PORT ||  3000;
 
-app.use(express.json());
+// Allow large JSON payloads for asset create/update with base64 images
+app.use(express.json({ limit: '50mb' }));
 app.use(
     cors({
       origin: "*",
