@@ -289,7 +289,7 @@ module.exports.createAssetRequestCtrl = async (req, res) => {
       name, location, timezone, category, valuation, organizationId,
       // Extended fields
       description, imageUrl, imageUrls, assetType, portfolioToken, tokenPrice,
-      revenueModel, estimatedAnnualIncome, contractTerm,
+      revenueModel, estimatedAnnualIncome, contractTerm, contractDueDate,
       installationType, technologyType, numPanels, peakPowerKw, 
       peakSunHours, expectedAnnualOutput,
       tariffRate, tariffCurrency, tariffEscalation,
@@ -326,19 +326,19 @@ module.exports.createAssetRequestCtrl = async (req, res) => {
       `INSERT INTO sites 
        (id, name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at,
         description, image_url, image_urls, asset_type, portfolio_token, token_price,
-        revenue_model, estimated_annual_income, contract_term,
+        revenue_model, estimated_annual_income, contract_term, contract_due_date,
         installation_type, technology_type, num_panels, peak_power_kw, peak_sun_hours, expected_annual_output,
         tariff_rate, tariff_currency, tariff_escalation,
         yield_investor_pct, yield_maintenance_pct, yield_platform_pct, yield_treasury_pct,
         show_in_invest, show_in_console)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(),
-        $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
+        $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
        RETURNING *`,
       [
         siteId, name, location, timezone || 'UTC', category.toUpperCase(), 
         valuation || 0, organizationId || null, status, creatorId,
         description || null, primaryImage, imageUrlsJson, assetType || null, portfolioToken || null, tokenPrice || 1,
-        revenueModel || null, estimatedAnnualIncome || null, contractTerm || null,
+        revenueModel || null, estimatedAnnualIncome || null, contractTerm || null, contractDueDate || null,
         installationType || null, technologyType || null, numPanels || null, peakPowerKw || null, 
         peakSunHours || 4.5, expectedAnnualOutput || null,
         tariffRate || null, tariffCurrency || 'USD', tariffEscalation || null,
@@ -369,7 +369,7 @@ module.exports.createAssetCtrl = async (req, res) => {
       name, location, timezone, category, valuation, organizationId,
       // Extended fields
       description, imageUrl, imageUrls, assetType, portfolioToken, tokenPrice,
-      revenueModel, estimatedAnnualIncome, contractTerm,
+      revenueModel, estimatedAnnualIncome, contractTerm, contractDueDate,
       installationType, technologyType, numPanels, peakPowerKw, 
       peakSunHours, expectedAnnualOutput,
       tariffRate, tariffCurrency, tariffEscalation,
@@ -404,19 +404,19 @@ module.exports.createAssetCtrl = async (req, res) => {
       `INSERT INTO sites 
        (id, name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at,
         description, image_url, image_urls, asset_type, portfolio_token, token_price,
-        revenue_model, estimated_annual_income, contract_term,
+        revenue_model, estimated_annual_income, contract_term, contract_due_date,
         installation_type, technology_type, num_panels, peak_power_kw, peak_sun_hours, expected_annual_output,
         tariff_rate, tariff_currency, tariff_escalation,
         yield_investor_pct, yield_maintenance_pct, yield_platform_pct, yield_treasury_pct,
         show_in_invest, show_in_console)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NOW(),
-        $9, $10, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32)
+        $9, $10, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
        RETURNING *`,
       [
         siteId, name, location, timezone || 'UTC', category.toUpperCase(), 
         valuation || 0, organizationId || null, creatorId,
         description || null, primaryImage, imageUrlsJson, assetType || null, portfolioToken || null, tokenPrice || 1,
-        revenueModel || null, estimatedAnnualIncome || null, contractTerm || null,
+        revenueModel || null, estimatedAnnualIncome || null, contractTerm || null, contractDueDate || null,
         installationType || null, technologyType || null, numPanels || null, peakPowerKw || null, 
         peakSunHours || 4.5, expectedAnnualOutput || null,
         tariffRate || null, tariffCurrency || 'USD', tariffEscalation || null,
@@ -561,6 +561,7 @@ module.exports.getAssetByIdCtrl = async (req, res) => {
         s.revenue_model,
         s.estimated_annual_income,
         s.contract_term,
+        s.contract_due_date,
         s.installation_type,
         s.technology_type,
         s.num_panels,
@@ -608,7 +609,7 @@ module.exports.updateAssetCtrl = async (req, res) => {
     const {
       name, location, timezone, category, valuation,
       description, imageUrl, imageUrls, assetType, portfolioToken, tokenPrice,
-      revenueModel, estimatedAnnualIncome, contractTerm,
+      revenueModel, estimatedAnnualIncome, contractTerm, contractDueDate,
       installationType, technologyType, numPanels, peakPowerKw,
       peakSunHours, expectedAnnualOutput,
       tariffRate, tariffCurrency, tariffEscalation,
@@ -682,6 +683,10 @@ module.exports.updateAssetCtrl = async (req, res) => {
     if (contractTerm !== undefined) {
       updates.push(`contract_term = $${paramIndex++}`);
       values.push(contractTerm || null);
+    }
+    if (contractDueDate !== undefined) {
+      updates.push(`contract_due_date = $${paramIndex++}`);
+      values.push(contractDueDate || null);
     }
     if (installationType !== undefined) {
       updates.push(`installation_type = $${paramIndex++}`);
