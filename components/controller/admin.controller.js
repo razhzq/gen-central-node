@@ -555,6 +555,7 @@ module.exports.getAssetByIdCtrl = async (req, res) => {
         s.created_at,
         s.description,
         s.image_url,
+        s.image_urls,
         s.asset_type,
         s.portfolio_token,
         s.token_price,
