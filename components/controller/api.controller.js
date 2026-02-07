@@ -735,7 +735,7 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
     const { assetId } = req.params;
     const EMISSION_FACTOR = 0.71;
 
-    // Get site details with IoT pubkey
+    // Get site details with IoT pubkey and images
     const siteRes = await query(
       `SELECT 
         s.id,
@@ -744,12 +744,14 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
         s.category,
         s.timezone,
         s.sites_valuation,
+        s.image_url,
+        s.image_urls,
         COUNT(DISTINCT m.id) as meter_count,
         MAX(m.iot_pubkey) as iot_pubkey
        FROM sites s
        LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
        WHERE s.id = $1
-       GROUP BY s.id, s.name, s.location, s.category, s.timezone, s.sites_valuation`,
+       GROUP BY s.id, s.name, s.location, s.category, s.timezone, s.sites_valuation, s.image_url, s.image_urls`,
       [assetId]
     );
 
@@ -812,6 +814,9 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
     const apyRange = apyRanges[site.category] || { min: 8, max: 12 };
     const apy = (apyRange.min + apyRange.max) / 2;
 
+    const imageUrls = Array.isArray(site.image_urls) ? site.image_urls : [];
+    const imageUrl = site.image_url || (imageUrls.length > 0 ? imageUrls[0] : null);
+
     res.json({
       id: site.id,
       name: site.name,
@@ -829,6 +834,8 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
       iotPubkey: site.iot_pubkey || null,
       lastUpdated: metrics.latest_timestamp || new Date().toISOString(),
       dailyPerformance: dailyPerformance,
+      imageUrl: imageUrl,
+      imageUrls: imageUrls.length > 0 ? imageUrls : (imageUrl ? [imageUrl] : []),
     });
   } catch (err) {
     console.error('[API] Error getting investment asset details:', err);
