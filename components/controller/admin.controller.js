@@ -833,6 +833,94 @@ module.exports.updateAssetVisibilityCtrl = async (req, res) => {
 };
 
 /**
+ * Get all registered meters (Checker only) - for linking to sites in admin UI
+ * GET /api/admin/meters
+ * Query: limit, offset, unlinkedOnly (true to show only meters with no site)
+ */
+module.exports.getMetersCtrl = async (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+    const offset = parseInt(req.query.offset) || 0;
+    const unlinkedOnly = req.query.unlinkedOnly === 'true';
+
+    const whereClause = unlinkedOnly ? ' WHERE m.site_id IS NULL' : '';
+
+    const result = await query(
+      `SELECT 
+        m.id,
+        m.site_id,
+        m.meter_identifier,
+        m.iot_pubkey,
+        m.asset_type,
+        m.firmware_version,
+        m.active,
+        m.installed_at,
+        s.name as site_name,
+        s.location as site_location
+       FROM meters m
+       LEFT JOIN sites s ON m.site_id = s.id
+       ${whereClause}
+       ORDER BY m.installed_at DESC NULLS LAST, m.meter_identifier
+       LIMIT $1 OFFSET $2`,
+      [limit, offset]
+    );
+
+    const countResult = await query(
+      `SELECT COUNT(*) as total FROM meters m ${whereClause}`,
+      []
+    );
+    const total = parseInt(countResult.rows[0]?.total || '0', 10);
+
+    res.json({
+      meters: result.rows,
+      total,
+      limit,
+      offset,
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error getting meters:', err);
+    res.status(500).json({ error: 'Failed to get meters', message: err.message });
+  }
+};
+
+/**
+ * Link a meter to a site (Checker only)
+ * PUT /api/admin/meters/:meterId/site
+ * Body: { site_id: UUID } or { site_id: null } to unlink
+ */
+module.exports.linkMeterToSiteCtrl = async (req, res) => {
+  try {
+    const { meterId } = req.params;
+    const { site_id: siteId } = req.body;
+
+    if (siteId !== undefined && siteId !== null) {
+      const siteRes = await query('SELECT id FROM sites WHERE id = $1', [siteId]);
+      if (siteRes.rowCount === 0) {
+        return res.status(400).json({ error: 'Site does not exist' });
+      }
+    }
+
+    const result = await query(
+      `UPDATE meters SET site_id = $1 WHERE id = $2 RETURNING id, site_id, meter_identifier`,
+      [siteId || null, meterId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Meter not found' });
+    }
+
+    res.json({
+      success: true,
+      message: siteId ? 'Meter linked to site' : 'Meter unlinked',
+      meter: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error linking meter to site:', err);
+    res.status(500).json({ error: 'Failed to link meter', message: err.message });
+  }
+};
+
+/**
  * Get maker's own asset requests
  * GET /api/admin/my-requests
  */
