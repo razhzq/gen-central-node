@@ -601,7 +601,7 @@ module.exports.getInvestmentCategoriesCtrl = async (req, res) => {
   try {
     const EMISSION_FACTOR = 0.71;
 
-    // Get category summaries with total valuation
+    // Get category summaries with total valuation (only active sites shown in invest)
     const result = await query(
       `SELECT 
         s.category,
@@ -619,6 +619,8 @@ module.exports.getInvestmentCategoriesCtrl = async (req, res) => {
          WHERE tb.meter_id = m.id AND tb.status = 'VALIDATED'
        ) latest_energy ON true
        WHERE s.category IS NOT NULL
+         AND s.status = 'active'
+         AND COALESCE(s.show_in_invest, true) = true
        GROUP BY s.category`
     );
 
@@ -658,7 +660,7 @@ module.exports.getInvestmentAssetsByCategoryCtrl = async (req, res) => {
       return res.status(400).json({ error: 'Invalid category' });
     }
 
-    // Get sites for this category with their metrics
+    // Get sites for this category with their metrics (only active, show_in_invest)
     const result = await query(
       `SELECT 
         s.id,
@@ -682,6 +684,8 @@ module.exports.getInvestmentAssetsByCategoryCtrl = async (req, res) => {
          WHERE tb.meter_id = m.id AND tb.status = 'VALIDATED'
        ) latest_data ON true
        WHERE UPPER(s.category::text) = UPPER($1)
+         AND s.status = 'active'
+         AND COALESCE(s.show_in_invest, true) = true
        GROUP BY s.id, s.name, s.location, s.category, s.sites_valuation
        ORDER BY s.name`,
       [category]
@@ -735,7 +739,7 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
     const { assetId } = req.params;
     const EMISSION_FACTOR = 0.71;
 
-    // Get site details with IoT pubkey
+    // Get site details with IoT pubkey (and status for visibility check)
     const siteRes = await query(
       `SELECT 
         s.id,
@@ -744,12 +748,14 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
         s.category,
         s.timezone,
         s.sites_valuation,
+        s.status,
+        s.show_in_invest,
         COUNT(DISTINCT m.id) as meter_count,
         MAX(m.iot_pubkey) as iot_pubkey
        FROM sites s
        LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
        WHERE s.id = $1
-       GROUP BY s.id, s.name, s.location, s.category, s.timezone, s.sites_valuation`,
+       GROUP BY s.id, s.name, s.location, s.category, s.timezone, s.sites_valuation, s.status, s.show_in_invest`,
       [assetId]
     );
 
@@ -758,6 +764,9 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
     }
 
     const site = siteRes.rows[0];
+    if (site.status !== 'active' || site.show_in_invest === false) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
 
     // Get energy metrics
     const metricsRes = await query(
