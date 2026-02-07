@@ -739,7 +739,7 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
     const { assetId } = req.params;
     const EMISSION_FACTOR = 0.71;
 
-    // Get site details with IoT pubkey, images, and status for visibility check
+    // Get full site details (all admin-editable fields) for asset detail page
     const siteRes = await query(
       `SELECT 
         s.id,
@@ -748,8 +748,25 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
         s.category,
         s.timezone,
         s.sites_valuation,
+        s.description,
         s.image_url,
         s.image_urls,
+        s.asset_type,
+        s.portfolio_token,
+        s.token_price,
+        s.revenue_model,
+        s.estimated_annual_income,
+        s.contract_term,
+        s.installation_type,
+        s.technology_type,
+        s.num_panels,
+        s.peak_power_kw,
+        s.peak_sun_hours,
+        s.expected_annual_output,
+        s.yield_investor_pct,
+        s.yield_maintenance_pct,
+        s.yield_platform_pct,
+        s.yield_treasury_pct,
         s.status,
         s.show_in_invest,
         COUNT(DISTINCT m.id) as meter_count,
@@ -757,7 +774,12 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
        FROM sites s
        LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
        WHERE s.id = $1
-       GROUP BY s.id, s.name, s.location, s.category, s.timezone, s.sites_valuation, s.image_url, s.image_urls, s.status, s.show_in_invest`,
+       GROUP BY s.id, s.name, s.location, s.category, s.timezone, s.sites_valuation,
+        s.description, s.image_url, s.image_urls, s.asset_type, s.portfolio_token, s.token_price,
+        s.revenue_model, s.estimated_annual_income, s.contract_term,
+        s.installation_type, s.technology_type, s.num_panels, s.peak_power_kw, s.peak_sun_hours,
+        s.expected_annual_output, s.yield_investor_pct, s.yield_maintenance_pct, s.yield_platform_pct, s.yield_treasury_pct,
+        s.status, s.show_in_invest`,
       [assetId]
     );
 
@@ -785,10 +807,10 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
 
     const metrics = metricsRes.rows[0] || {};
     const totalEnergyKwh = parseFloat(metrics.total_energy_kwh) || 0;
-    const peakPowerKw = (parseFloat(metrics.peak_power_w) || 0) / 1000;
+    const peakFromTelemetry = (parseFloat(metrics.peak_power_w) || 0) / 1000;
+    const peakPowerKw = site.peak_power_kw != null ? parseFloat(site.peak_power_kw) : peakFromTelemetry;
     const co2OffsetTons = (totalEnergyKwh * EMISSION_FACTOR) / 1000;
-    
-    // Use sites_valuation from database, fallback to calculated value if null
+
     const valuation = parseFloat(site.sites_valuation) || Math.round(totalEnergyKwh * 0.5);
 
     // Get recent daily performance (last 30 days)
@@ -835,7 +857,7 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
       valuation: valuation,
       status: parseInt(site.meter_count) > 0 ? 'Live' : 'Pilot',
       apy: apy,
-      peakPowerKw: parseFloat(peakPowerKw.toFixed(2)),
+      peakPowerKw: parseFloat(Number(peakPowerKw).toFixed(2)),
       totalEnergyKwh: parseFloat(totalEnergyKwh.toFixed(2)),
       totalEnergyMwh: parseFloat((totalEnergyKwh / 1000).toFixed(2)),
       co2OffsetTons: parseFloat(co2OffsetTons.toFixed(2)),
@@ -845,6 +867,22 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
       dailyPerformance: dailyPerformance,
       imageUrl: imageUrl,
       imageUrls: imageUrls.length > 0 ? imageUrls : (imageUrl ? [imageUrl] : []),
+      description: site.description || null,
+      assetType: site.asset_type || null,
+      portfolioToken: site.portfolio_token || null,
+      tokenPrice: site.token_price != null ? parseFloat(site.token_price) : null,
+      revenueModel: site.revenue_model || null,
+      estimatedAnnualIncome: site.estimated_annual_income != null ? parseFloat(site.estimated_annual_income) : null,
+      contractTerm: site.contract_term || null,
+      installationType: site.installation_type || null,
+      technologyType: site.technology_type || null,
+      numPanels: site.num_panels != null ? parseInt(site.num_panels) : null,
+      peakSunHours: site.peak_sun_hours != null ? parseFloat(site.peak_sun_hours) : null,
+      expectedAnnualOutput: site.expected_annual_output || null,
+      yieldInvestorPct: site.yield_investor_pct != null ? parseFloat(site.yield_investor_pct) : null,
+      yieldMaintenancePct: site.yield_maintenance_pct != null ? parseFloat(site.yield_maintenance_pct) : null,
+      yieldPlatformPct: site.yield_platform_pct != null ? parseFloat(site.yield_platform_pct) : null,
+      yieldTreasuryPct: site.yield_treasury_pct != null ? parseFloat(site.yield_treasury_pct) : null,
     });
   } catch (err) {
     console.error('[API] Error getting investment asset details:', err);
