@@ -148,8 +148,8 @@ coreRouter.get('/api/bank-details', getBankDetailsCtrl);
 // ADMIN ROUTES
 // ============================================
 
-// Admin dashboard stats (Checker only)
-coreRouter.get('/api/admin/stats', requireChecker, getAdminStatsCtrl);
+// Admin dashboard stats (Maker or Checker)
+coreRouter.get('/api/admin/stats', requireMakerOrChecker, getAdminStatsCtrl);
 
 // Deposit request management (Checker only)
 coreRouter.get('/api/admin/deposit-requests', requireChecker, getDepositRequestsCtrl);
