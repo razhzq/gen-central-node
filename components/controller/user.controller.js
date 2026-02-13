@@ -657,9 +657,76 @@ module.exports.getDepositRequestsCtrl = async (req, res) => {
     })));
   } catch (err) {
     console.error('[USER] Error getting deposit requests:', err);
-    res.status(500).json({ 
-      error: 'Failed to get deposit requests', 
-      message: err.message 
+    res.status(500).json({
+      error: 'Failed to get deposit requests',
+      message: err.message
+    });
+  }
+};
+
+// ============================================
+// ASSET OWNER REQUESTS
+// ============================================
+
+/**
+ * Submit asset owner request
+ * POST /api/users/:walletAddress/asset-owner-request
+ * Body: { companyName?, message? }
+ */
+module.exports.submitAssetOwnerRequestCtrl = async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+    const { companyName, message } = req.body;
+
+    // Get user
+    const userResult = await query(
+      `SELECT id, email FROM users WHERE wallet_address = $1`,
+      [walletAddress]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userResult.rows[0];
+
+    // Check if user already has a pending request
+    const existingResult = await query(
+      `SELECT id FROM asset_owner_requests WHERE user_id = $1 AND status = 'pending'`,
+      [user.id]
+    );
+
+    if (existingResult.rows.length > 0) {
+      return res.json({
+        success: true,
+        message: 'You already have a pending asset owner request.',
+        request: { id: existingResult.rows[0].id, status: 'pending' },
+      });
+    }
+
+    // Create asset owner request
+    const result = await query(
+      `INSERT INTO asset_owner_requests
+       (user_id, company_name, contact_email, message, status)
+       VALUES ($1, $2, $3, $4, 'pending')
+       RETURNING *`,
+      [user.id, companyName || null, user.email, message || null]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Asset owner request submitted. Our team will review and contact you.',
+      request: {
+        id: result.rows[0].id,
+        status: 'pending',
+        created_at: result.rows[0].created_at,
+      }
+    });
+  } catch (err) {
+    console.error('[USER] Error submitting asset owner request:', err);
+    res.status(500).json({
+      error: 'Failed to submit asset owner request',
+      message: err.message
     });
   }
 };

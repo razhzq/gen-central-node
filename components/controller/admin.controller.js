@@ -1119,11 +1119,13 @@ module.exports.getAdminStatsCtrl = async (req, res) => {
       pendingAssets,
       totalUsers,
       activeAssets,
+      pendingAssetOwners,
     ] = await Promise.all([
       query(`SELECT COUNT(*) as count FROM deposit_requests WHERE status = 'pending'`),
       query(`SELECT COUNT(*) as count FROM sites WHERE status = 'pending'`),
       query(`SELECT COUNT(*) as count FROM users`),
       query(`SELECT COUNT(*) as count FROM sites WHERE status = 'active'`),
+      query(`SELECT COUNT(*) as count FROM asset_owner_requests WHERE status = 'pending'`),
     ]);
 
     res.json({
@@ -1131,10 +1133,172 @@ module.exports.getAdminStatsCtrl = async (req, res) => {
       pendingAssets: parseInt(pendingAssets.rows[0].count),
       totalUsers: parseInt(totalUsers.rows[0].count),
       activeAssets: parseInt(activeAssets.rows[0].count),
+      pendingAssetOwners: parseInt(pendingAssetOwners.rows[0].count),
     });
   } catch (err) {
     console.error('[ADMIN] Error getting stats:', err);
     res.status(500).json({ error: 'Failed to get stats', message: err.message });
+  }
+};
+
+// ============================================
+// ASSET OWNER REQUEST MANAGEMENT (Checker only)
+// ============================================
+
+/**
+ * Get all asset owner requests (for checker)
+ * GET /api/admin/asset-owner-requests
+ * Query params: status (pending|approved|rejected), limit, offset
+ */
+module.exports.getAssetOwnerRequestsCtrl = async (req, res) => {
+  try {
+    const status = req.query.status || 'pending';
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+
+    const result = await query(
+      `SELECT
+        aor.id,
+        aor.company_name,
+        aor.contact_email,
+        aor.message,
+        aor.status,
+        aor.rejection_reason,
+        aor.created_at,
+        aor.reviewed_at,
+        u.id as user_id,
+        u.email as user_email,
+        u.wallet_address as user_wallet,
+        u.user_type as current_role,
+        reviewer.email as reviewed_by_email
+       FROM asset_owner_requests aor
+       JOIN users u ON aor.user_id = u.id
+       LEFT JOIN users reviewer ON aor.reviewed_by = reviewer.id
+       WHERE aor.status = $1
+       ORDER BY aor.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [status, limit, offset]
+    );
+
+    const countResult = await query(
+      `SELECT COUNT(*) as total FROM asset_owner_requests WHERE status = $1`,
+      [status]
+    );
+
+    res.json({
+      requests: result.rows,
+      total: parseInt(countResult.rows[0].total),
+      limit,
+      offset,
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error getting asset owner requests:', err);
+    res.status(500).json({ error: 'Failed to get asset owner requests', message: err.message });
+  }
+};
+
+/**
+ * Approve asset owner request (Checker only)
+ * POST /api/admin/asset-owner-requests/:id/approve
+ * On approval: upgrades user to 'maker' role
+ */
+module.exports.approveAssetOwnerRequestCtrl = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+    const checkerId = req.user.id;
+
+    await client.query('BEGIN');
+
+    // Get the request
+    const requestResult = await client.query(
+      `SELECT aor.*, u.id as user_id, u.user_type
+       FROM asset_owner_requests aor
+       JOIN users u ON aor.user_id = u.id
+       WHERE aor.id = $1 AND aor.status = 'pending'`,
+      [id]
+    );
+
+    if (requestResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Request not found or already processed' });
+    }
+
+    const request = requestResult.rows[0];
+
+    // Update request status
+    await client.query(
+      `UPDATE asset_owner_requests
+       SET status = 'approved',
+           reviewed_by = $1,
+           reviewed_at = NOW()
+       WHERE id = $2`,
+      [checkerId, id]
+    );
+
+    // Upgrade user to maker role (so they can create/manage assets)
+    await client.query(
+      `UPDATE users
+       SET user_type = 'maker',
+           updated_at = NOW()
+       WHERE id = $1`,
+      [request.user_id]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: 'Asset owner request approved. User upgraded to maker role.',
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[ADMIN] Error approving asset owner request:', err);
+    res.status(500).json({ error: 'Failed to approve request', message: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * Reject asset owner request (Checker only)
+ * POST /api/admin/asset-owner-requests/:id/reject
+ * Body: { reason }
+ */
+module.exports.rejectAssetOwnerRequestCtrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const checkerId = req.user.id;
+
+    if (!reason) {
+      return res.status(400).json({ error: 'Rejection reason is required' });
+    }
+
+    const result = await query(
+      `UPDATE asset_owner_requests
+       SET status = 'rejected',
+           rejection_reason = $1,
+           reviewed_by = $2,
+           reviewed_at = NOW()
+       WHERE id = $3 AND status = 'pending'
+       RETURNING *`,
+      [reason, checkerId, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Request not found or already processed' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Asset owner request rejected',
+      reason,
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error rejecting asset owner request:', err);
+    res.status(500).json({ error: 'Failed to reject request', message: err.message });
   }
 };
 

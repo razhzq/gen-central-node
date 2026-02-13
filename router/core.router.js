@@ -30,6 +30,7 @@ const {
   recordInvestmentCtrl,
   submitDepositRequestCtrl,
   getDepositRequestsCtrl: getUserDepositRequestsCtrl,
+  submitAssetOwnerRequestCtrl,
 } = require('../components/controller/user.controller');
 const {
   checkAndMintUSDCCtrl,
@@ -52,6 +53,9 @@ const {
   getMetersCtrl,
   linkMeterToSiteCtrl,
   getMyAssetRequestsCtrl,
+  getAssetOwnerRequestsCtrl,
+  approveAssetOwnerRequestCtrl,
+  rejectAssetOwnerRequestCtrl,
   getAllUsersCtrl,
   updateUserTypeCtrl,
   adjustUserBalanceCtrl,
@@ -141,6 +145,9 @@ coreRouter.get('/api/usdc/:walletAddress/balance', getUSDCBalanceCtrl);
 coreRouter.post('/api/users/:walletAddress/deposit-request', upload.single('receipt'), submitDepositRequestCtrl);
 coreRouter.get('/api/users/:walletAddress/deposit-requests', getUserDepositRequestsCtrl);
 
+// Asset owner request (any authenticated user)
+coreRouter.post('/api/users/:walletAddress/asset-owner-request', submitAssetOwnerRequestCtrl);
+
 // Bank details (public - shows GEN bank account info for deposits)
 coreRouter.get('/api/bank-details', getBankDetailsCtrl);
 
@@ -175,6 +182,11 @@ coreRouter.put('/api/admin/meters/:meterId/site', requireChecker, linkMeterToSit
 // Asset request creation (Maker or Checker)
 coreRouter.post('/api/admin/assets/request', requireMakerOrChecker, createAssetRequestCtrl);
 coreRouter.get('/api/admin/my-requests', requireMakerOrChecker, getMyAssetRequestsCtrl);
+
+// Asset owner request management (Checker only)
+coreRouter.get('/api/admin/asset-owner-requests', requireChecker, getAssetOwnerRequestsCtrl);
+coreRouter.post('/api/admin/asset-owner-requests/:id/approve', requireChecker, approveAssetOwnerRequestCtrl);
+coreRouter.post('/api/admin/asset-owner-requests/:id/reject', requireChecker, rejectAssetOwnerRequestCtrl);
 
 // User management (Checker only)
 coreRouter.get('/api/admin/users', requireChecker, getAllUsersCtrl);
