@@ -67,6 +67,7 @@ const {
   checkTokenizationEligibilityCtrl,
   getMyBrandingCtrl,
   updateMyBrandingCtrl,
+  getOrgBrandingCtrl,
 } = require('../components/controller/admin.controller');
 const {
   requireChecker,
@@ -198,6 +199,9 @@ coreRouter.get('/api/admin/assets/:siteId/tokenize-check', requireMakerOrChecker
 // Maker branding (Maker or Checker)
 coreRouter.get('/api/admin/my-branding', requireMakerOrChecker, getMyBrandingCtrl);
 coreRouter.put('/api/admin/my-branding', requireMakerOrChecker, updateMyBrandingCtrl);
+
+// Public org branding (no auth, used by invest portal)
+coreRouter.get('/api/org/:orgId/branding', getOrgBrandingCtrl);
 
 // Asset owner request management (Checker only)
 coreRouter.get('/api/admin/asset-owner-requests', requireChecker, getAssetOwnerRequestsCtrl);

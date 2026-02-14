@@ -1533,7 +1533,7 @@ module.exports.getMyBrandingCtrl = async (req, res) => {
     }
 
     const orgResult = await query(
-      `SELECT id, name, company_name, logo_url, org_type FROM organizations WHERE id = $1`,
+      `SELECT id, name, company_name, logo_url, org_type, theme_colors FROM organizations WHERE id = $1`,
       [userResult.rows[0].organization_id]
     );
 
@@ -1552,7 +1552,7 @@ module.exports.getMyBrandingCtrl = async (req, res) => {
 module.exports.updateMyBrandingCtrl = async (req, res) => {
   try {
     const userId = req.user.id;
-    const { companyName, logoUrl } = req.body;
+    const { companyName, logoUrl, themeColors } = req.body;
 
     const userResult = await query(
       `SELECT u.organization_id FROM users u WHERE u.id = $1`,
@@ -1577,6 +1577,10 @@ module.exports.updateMyBrandingCtrl = async (req, res) => {
       updates.push(`logo_url = $${paramIndex++}`);
       values.push(logoUrl);
     }
+    if (themeColors !== undefined) {
+      updates.push(`theme_colors = $${paramIndex++}`);
+      values.push(JSON.stringify(themeColors));
+    }
 
     if (updates.length === 0) {
       return res.status(400).json({ error: 'No fields to update' });
@@ -1594,5 +1598,29 @@ module.exports.updateMyBrandingCtrl = async (req, res) => {
   } catch (err) {
     console.error('[ADMIN] Error updating branding:', err);
     res.status(500).json({ error: 'Failed to update branding', message: err.message });
+  }
+};
+
+/**
+ * Get organization branding by org ID (public, no auth required)
+ * GET /api/org/:orgId/branding
+ */
+module.exports.getOrgBrandingCtrl = async (req, res) => {
+  try {
+    const { orgId } = req.params;
+
+    const result = await query(
+      `SELECT id, company_name, logo_url, org_type, theme_colors FROM organizations WHERE id = $1`,
+      [orgId]
+    );
+
+    if (!result.rows.length) {
+      return res.status(404).json({ error: 'Organization not found' });
+    }
+
+    res.json({ branding: result.rows[0] });
+  } catch (err) {
+    console.error('[ADMIN] Error getting org branding:', err);
+    res.status(500).json({ error: 'Failed to get org branding', message: err.message });
   }
 };
