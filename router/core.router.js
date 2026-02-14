@@ -61,6 +61,12 @@ const {
   adjustUserBalanceCtrl,
   getAdminStatsCtrl,
   getBankDetailsCtrl,
+  requestTokenizationCtrl,
+  approveTokenizationCtrl,
+  rejectTokenizationCtrl,
+  checkTokenizationEligibilityCtrl,
+  getMyBrandingCtrl,
+  updateMyBrandingCtrl,
 } = require('../components/controller/admin.controller');
 const {
   requireChecker,
@@ -182,6 +188,16 @@ coreRouter.put('/api/admin/meters/:meterId/site', requireChecker, linkMeterToSit
 // Asset request creation (Maker or Checker)
 coreRouter.post('/api/admin/assets/request', requireMakerOrChecker, createAssetRequestCtrl);
 coreRouter.get('/api/admin/my-requests', requireMakerOrChecker, getMyAssetRequestsCtrl);
+
+// Tokenization (Maker-Checker pattern)
+coreRouter.post('/api/admin/assets/:siteId/tokenize-request', requireMakerOrChecker, requestTokenizationCtrl);
+coreRouter.post('/api/admin/assets/:siteId/tokenize-approve', requireChecker, approveTokenizationCtrl);
+coreRouter.post('/api/admin/assets/:siteId/tokenize-reject', requireChecker, rejectTokenizationCtrl);
+coreRouter.get('/api/admin/assets/:siteId/tokenize-check', requireMakerOrChecker, checkTokenizationEligibilityCtrl);
+
+// Maker branding (Maker or Checker)
+coreRouter.get('/api/admin/my-branding', requireMakerOrChecker, getMyBrandingCtrl);
+coreRouter.put('/api/admin/my-branding', requireMakerOrChecker, updateMyBrandingCtrl);
 
 // Asset owner request management (Checker only)
 coreRouter.get('/api/admin/asset-owner-requests', requireChecker, getAssetOwnerRequestsCtrl);

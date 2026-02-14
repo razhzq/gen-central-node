@@ -290,25 +290,24 @@ module.exports.createAssetRequestCtrl = async (req, res) => {
       // Extended fields
       description, imageUrl, imageUrls, assetType, portfolioToken, tokenPrice,
       revenueModel, estimatedAnnualIncome, contractTerm, contractDueDate,
-      installationType, technologyType, numPanels, peakPowerKw, 
+      installationType, technologyType, numPanels, peakPowerKw,
       peakSunHours, expectedAnnualOutput,
       tariffRate, tariffCurrency, tariffEscalation,
-      yieldInvestorPct, yieldMaintenancePct, yieldPlatformPct, yieldTreasuryPct,
-      showInInvest, showInConsole
+      yieldInvestorPct, yieldMaintenancePct, yieldPlatformPct, yieldTreasuryPct
     } = req.body;
     const creatorId = req.user.id;
 
     if (!name || !location || !category) {
-      return res.status(400).json({ 
-        error: 'Name, location, and category are required' 
+      return res.status(400).json({
+        error: 'Name, location, and category are required'
       });
     }
 
     // Validate category
     const validCategories = ['SOLAR', 'EV', 'EE'];
     if (!validCategories.includes(category.toUpperCase())) {
-      return res.status(400).json({ 
-        error: 'Invalid category. Must be SOLAR, EV, or EE' 
+      return res.status(400).json({
+        error: 'Invalid category. Must be SOLAR, EV, or EE'
       });
     }
 
@@ -318,12 +317,13 @@ module.exports.createAssetRequestCtrl = async (req, res) => {
     const primaryImage = urls[0] || imageUrl || null;
     const imageUrlsJson = JSON.stringify(urls);
 
-    // If maker is checker, create as active; otherwise pending
-    const status = req.user.user_type === 'checker' ? 'active' : 'pending';
+    // If maker is checker, create as active and show in console; otherwise pending
+    const isChecker = req.user.user_type === 'checker';
+    const status = isChecker ? 'active' : 'pending';
     const siteId = uuidv4();
 
     const result = await query(
-      `INSERT INTO sites 
+      `INSERT INTO sites
        (id, name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at,
         description, image_url, image_urls, asset_type, portfolio_token, token_price,
         revenue_model, estimated_annual_income, contract_term, contract_due_date,
@@ -335,22 +335,22 @@ module.exports.createAssetRequestCtrl = async (req, res) => {
         $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
        RETURNING *`,
       [
-        siteId, name, location, timezone || 'UTC', category.toUpperCase(), 
+        siteId, name, location, timezone || 'UTC', category.toUpperCase(),
         valuation || 0, organizationId || null, status, creatorId,
         description || null, primaryImage, imageUrlsJson, assetType || null, portfolioToken || null, tokenPrice || 1,
         revenueModel || null, estimatedAnnualIncome || null, contractTerm || null, contractDueDate || null,
-        installationType || null, technologyType || null, numPanels || null, peakPowerKw || null, 
+        installationType || null, technologyType || null, numPanels || null, peakPowerKw || null,
         peakSunHours || 4.5, expectedAnnualOutput || null,
         tariffRate || null, tariffCurrency || 'USD', tariffEscalation || null,
         yieldInvestorPct || 60, yieldMaintenancePct || 10, yieldPlatformPct || 10, yieldTreasuryPct || 20,
-        showInInvest !== false, showInConsole === true
+        false, isChecker
       ]
     );
 
-    res.status(201).json({ 
-      success: true, 
+    res.status(201).json({
+      success: true,
       message: status === 'active' ? 'Asset created' : 'Asset request submitted for approval',
-      asset: result.rows[0] 
+      asset: result.rows[0]
     });
   } catch (err) {
     console.error('[ADMIN] Error creating asset request:', err);
@@ -370,25 +370,24 @@ module.exports.createAssetCtrl = async (req, res) => {
       // Extended fields
       description, imageUrl, imageUrls, assetType, portfolioToken, tokenPrice,
       revenueModel, estimatedAnnualIncome, contractTerm, contractDueDate,
-      installationType, technologyType, numPanels, peakPowerKw, 
+      installationType, technologyType, numPanels, peakPowerKw,
       peakSunHours, expectedAnnualOutput,
       tariffRate, tariffCurrency, tariffEscalation,
-      yieldInvestorPct, yieldMaintenancePct, yieldPlatformPct, yieldTreasuryPct,
-      showInInvest, showInConsole
+      yieldInvestorPct, yieldMaintenancePct, yieldPlatformPct, yieldTreasuryPct
     } = req.body;
     const creatorId = req.user.id;
 
     if (!name || !location || !category) {
-      return res.status(400).json({ 
-        error: 'Name, location, and category are required' 
+      return res.status(400).json({
+        error: 'Name, location, and category are required'
       });
     }
 
     // Validate category
     const validCategories = ['SOLAR', 'EV', 'EE'];
     if (!validCategories.includes(category.toUpperCase())) {
-      return res.status(400).json({ 
-        error: 'Invalid category. Must be SOLAR, EV, or EE' 
+      return res.status(400).json({
+        error: 'Invalid category. Must be SOLAR, EV, or EE'
       });
     }
 
@@ -400,8 +399,9 @@ module.exports.createAssetCtrl = async (req, res) => {
 
     const siteId = uuidv4();
 
+    // Checker direct-create: active + visible in console, not in invest
     const result = await query(
-      `INSERT INTO sites 
+      `INSERT INTO sites
        (id, name, location, timezone, category, sites_valuation, organization_id, status, created_by, created_at,
         description, image_url, image_urls, asset_type, portfolio_token, token_price,
         revenue_model, estimated_annual_income, contract_term, contract_due_date,
@@ -413,15 +413,15 @@ module.exports.createAssetCtrl = async (req, res) => {
         $9, $10, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
        RETURNING *`,
       [
-        siteId, name, location, timezone || 'UTC', category.toUpperCase(), 
+        siteId, name, location, timezone || 'UTC', category.toUpperCase(),
         valuation || 0, organizationId || null, creatorId,
         description || null, primaryImage, imageUrlsJson, assetType || null, portfolioToken || null, tokenPrice || 1,
         revenueModel || null, estimatedAnnualIncome || null, contractTerm || null, contractDueDate || null,
-        installationType || null, technologyType || null, numPanels || null, peakPowerKw || null, 
+        installationType || null, technologyType || null, numPanels || null, peakPowerKw || null,
         peakSunHours || 4.5, expectedAnnualOutput || null,
         tariffRate || null, tariffCurrency || 'USD', tariffEscalation || null,
         yieldInvestorPct || 60, yieldMaintenancePct || 10, yieldPlatformPct || 10, yieldTreasuryPct || 20,
-        showInInvest !== false, showInConsole === true
+        false, true
       ]
     );
 
@@ -445,8 +445,8 @@ module.exports.approveAssetCtrl = async (req, res) => {
     const { siteId } = req.params;
 
     const result = await query(
-      `UPDATE sites 
-       SET status = 'active'
+      `UPDATE sites
+       SET status = 'active', show_in_console = true, show_in_invest = false
        WHERE id = $1 AND status = 'pending'
        RETURNING *`,
       [siteId]
@@ -456,10 +456,10 @@ module.exports.approveAssetCtrl = async (req, res) => {
       return res.status(404).json({ error: 'Asset not found or already processed' });
     }
 
-    res.json({ 
-      success: true, 
-      message: 'Asset approved and now active',
-      asset: result.rows[0] 
+    res.json({
+      success: true,
+      message: 'Asset approved — now visible in console as Pilot',
+      asset: result.rows[0]
     });
   } catch (err) {
     console.error('[ADMIN] Error approving asset:', err);
@@ -1314,4 +1314,276 @@ module.exports.getBankDetailsCtrl = async (req, res) => {
     swiftCode: process.env.GEN_BANK_SWIFT_CODE || 'GENBANK01',
     accountName: process.env.GEN_BANK_ACCOUNT_NAME || 'GEN Investment Platform',
   });
+};
+
+// ============================================
+// TOKENIZATION (Maker-Checker Pattern)
+// ============================================
+
+/**
+ * Request tokenization for a live asset (Maker or Checker)
+ * POST /api/admin/assets/:siteId/tokenize-request
+ * If caller is checker, auto-approves immediately.
+ */
+module.exports.requestTokenizationCtrl = async (req, res) => {
+  try {
+    const { siteId } = req.params;
+
+    const siteResult = await query(
+      `SELECT s.id, s.status, s.is_tokenized, s.tokenization_status,
+              (SELECT COUNT(*) FROM meters m WHERE m.site_id = s.id) as meter_count
+       FROM sites s WHERE s.id = $1`,
+      [siteId]
+    );
+
+    if (siteResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    const site = siteResult.rows[0];
+
+    if (site.status !== 'active') {
+      return res.status(400).json({ error: 'Asset must be approved (active) before tokenization' });
+    }
+
+    if (parseInt(site.meter_count) === 0) {
+      return res.status(400).json({ error: 'Asset must have at least one linked meter (be Live) before tokenization' });
+    }
+
+    if (site.is_tokenized) {
+      return res.status(400).json({ error: 'Asset is already tokenized' });
+    }
+
+    if (site.tokenization_status === 'pending') {
+      return res.status(400).json({ error: 'Tokenization request already pending' });
+    }
+
+    // If checker, auto-approve: tokenize immediately
+    if (req.user.user_type === 'checker') {
+      const result = await query(
+        `UPDATE sites
+         SET is_tokenized = true, tokenized_at = NOW(), show_in_invest = true, tokenization_status = 'approved'
+         WHERE id = $1
+         RETURNING *`,
+        [siteId]
+      );
+
+      return res.json({
+        success: true,
+        message: 'Asset tokenized and now visible in invest portal',
+        asset: result.rows[0],
+      });
+    }
+
+    // Maker: submit request for checker approval
+    const result = await query(
+      `UPDATE sites
+       SET tokenization_status = 'pending'
+       WHERE id = $1
+       RETURNING *`,
+      [siteId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Tokenization request submitted for approval',
+      asset: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error requesting tokenization:', err);
+    res.status(500).json({ error: 'Failed to request tokenization', message: err.message });
+  }
+};
+
+/**
+ * Approve tokenization request (Checker only)
+ * POST /api/admin/assets/:siteId/tokenize-approve
+ */
+module.exports.approveTokenizationCtrl = async (req, res) => {
+  try {
+    const { siteId } = req.params;
+
+    const result = await query(
+      `UPDATE sites
+       SET is_tokenized = true, tokenized_at = NOW(), show_in_invest = true, tokenization_status = 'approved'
+       WHERE id = $1 AND tokenization_status = 'pending'
+       RETURNING *`,
+      [siteId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No pending tokenization request found for this asset' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Tokenization approved — asset now visible in invest portal',
+      asset: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error approving tokenization:', err);
+    res.status(500).json({ error: 'Failed to approve tokenization', message: err.message });
+  }
+};
+
+/**
+ * Reject tokenization request (Checker only)
+ * POST /api/admin/assets/:siteId/tokenize-reject
+ */
+module.exports.rejectTokenizationCtrl = async (req, res) => {
+  try {
+    const { siteId } = req.params;
+
+    const result = await query(
+      `UPDATE sites
+       SET tokenization_status = 'rejected'
+       WHERE id = $1 AND tokenization_status = 'pending'
+       RETURNING *`,
+      [siteId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'No pending tokenization request found for this asset' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Tokenization request rejected',
+      asset: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error rejecting tokenization:', err);
+    res.status(500).json({ error: 'Failed to reject tokenization', message: err.message });
+  }
+};
+
+/**
+ * Check tokenization eligibility (Maker or Checker)
+ * GET /api/admin/assets/:siteId/tokenize-check
+ */
+module.exports.checkTokenizationEligibilityCtrl = async (req, res) => {
+  try {
+    const { siteId } = req.params;
+
+    const result = await query(
+      `SELECT s.status, s.is_tokenized, s.tokenization_status, s.show_in_console, s.show_in_invest,
+              (SELECT COUNT(*) FROM meters m WHERE m.site_id = s.id) as meter_count
+       FROM sites s WHERE s.id = $1`,
+      [siteId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+
+    const site = result.rows[0];
+    const meterCount = parseInt(site.meter_count);
+    const eligible = site.status === 'active' && meterCount > 0 && !site.is_tokenized && site.tokenization_status !== 'pending';
+
+    const reasons = [];
+    if (site.status !== 'active') reasons.push('Asset must be approved (active)');
+    if (meterCount === 0) reasons.push('Asset must have at least one linked meter');
+    if (site.is_tokenized) reasons.push('Asset is already tokenized');
+    if (site.tokenization_status === 'pending') reasons.push('Tokenization request already pending');
+
+    res.json({
+      eligible,
+      status: site.status,
+      meterCount,
+      isTokenized: site.is_tokenized,
+      tokenizationStatus: site.tokenization_status,
+      showInConsole: site.show_in_console,
+      showInInvest: site.show_in_invest,
+      reasons,
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error checking tokenization eligibility:', err);
+    res.status(500).json({ error: 'Failed to check eligibility', message: err.message });
+  }
+};
+
+// ============================================
+// MAKER BRANDING
+// ============================================
+
+/**
+ * Get maker's organization branding
+ * GET /api/admin/my-branding
+ */
+module.exports.getMyBrandingCtrl = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const userResult = await query(
+      `SELECT u.organization_id FROM users u WHERE u.id = $1`,
+      [userId]
+    );
+
+    if (!userResult.rows[0]?.organization_id) {
+      return res.json({ branding: null, message: 'No organization linked to this account' });
+    }
+
+    const orgResult = await query(
+      `SELECT id, name, company_name, logo_url, org_type FROM organizations WHERE id = $1`,
+      [userResult.rows[0].organization_id]
+    );
+
+    res.json({ branding: orgResult.rows[0] || null });
+  } catch (err) {
+    console.error('[ADMIN] Error getting branding:', err);
+    res.status(500).json({ error: 'Failed to get branding', message: err.message });
+  }
+};
+
+/**
+ * Update maker's organization branding (logo + company name)
+ * PUT /api/admin/my-branding
+ * Body: { companyName?, logoUrl? }
+ */
+module.exports.updateMyBrandingCtrl = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { companyName, logoUrl } = req.body;
+
+    const userResult = await query(
+      `SELECT u.organization_id FROM users u WHERE u.id = $1`,
+      [userId]
+    );
+
+    const orgId = userResult.rows[0]?.organization_id;
+
+    if (!orgId) {
+      return res.status(400).json({ error: 'No organization linked to this account. Contact admin.' });
+    }
+
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (companyName !== undefined) {
+      updates.push(`company_name = $${paramIndex++}`);
+      values.push(companyName);
+    }
+    if (logoUrl !== undefined) {
+      updates.push(`logo_url = $${paramIndex++}`);
+      values.push(logoUrl);
+    }
+
+    if (updates.length === 0) {
+      return res.status(400).json({ error: 'No fields to update' });
+    }
+
+    updates.push(`updated_at = NOW()`);
+    values.push(orgId);
+
+    const result = await query(
+      `UPDATE organizations SET ${updates.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+      values
+    );
+
+    res.json({ success: true, branding: result.rows[0] });
+  } catch (err) {
+    console.error('[ADMIN] Error updating branding:', err);
+    res.status(500).json({ error: 'Failed to update branding', message: err.message });
+  }
 };
