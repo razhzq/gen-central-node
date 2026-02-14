@@ -898,3 +898,152 @@ module.exports.getInvestmentAssetDetailsCtrl = async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch asset details', message: err.message });
   }
 };
+
+// ============================================
+// ORG-FILTERED INVESTMENT ENDPOINTS (for white-label portal)
+// ============================================
+
+/**
+ * Get investment categories summary filtered by organization
+ * GET /api/invest/org/:orgId/categories
+ */
+module.exports.getOrgInvestmentCategoriesCtrl = async (req, res) => {
+  try {
+    const { orgId } = req.params;
+    const EMISSION_FACTOR = 0.71;
+
+    const result = await query(
+      `SELECT
+        s.category,
+        COUNT(DISTINCT s.id) as site_count,
+        COUNT(DISTINCT m.id) as meter_count,
+        COALESCE(SUM(latest_energy.total_energy_kwh), 0) as total_energy_kwh,
+        COALESCE(SUM(s.sites_valuation), 0) as total_valuation
+       FROM sites s
+       LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
+       LEFT JOIN LATERAL (
+         SELECT
+           (MAX(tr.energy_exp_l1_wh + tr.energy_exp_l2_wh + tr.energy_exp_l3_wh) / 1000.0) as total_energy_kwh
+         FROM telemetry_raw tr
+         JOIN telemetry_batches tb ON tr.batch_id = tb.id
+         WHERE tb.meter_id = m.id AND tb.status = 'VALIDATED'
+       ) latest_energy ON true
+       WHERE s.category IS NOT NULL
+         AND s.status = 'active'
+         AND COALESCE(s.show_in_invest, true) = true
+         AND s.organization_id = $1
+       GROUP BY s.category`,
+      [orgId]
+    );
+
+    const categories = result.rows.map((row) => {
+      const totalEnergyKwh = parseFloat(row.total_energy_kwh) || 0;
+      const co2OffsetTons = (totalEnergyKwh * EMISSION_FACTOR) / 1000;
+      const totalValuation = parseFloat(row.total_valuation) || 0;
+
+      return {
+        category: row.category.toLowerCase(),
+        liveAssets: parseInt(row.site_count) || 0,
+        totalEnergyKwh: parseFloat(totalEnergyKwh.toFixed(2)),
+        co2OffsetTons: parseFloat(co2OffsetTons.toFixed(2)),
+        activeMeters: parseInt(row.meter_count) || 0,
+        totalValuation: parseFloat(totalValuation.toFixed(2)),
+      };
+    });
+
+    res.json(categories);
+  } catch (err) {
+    console.error('[API] Error getting org investment categories:', err);
+    res.status(500).json({ error: 'Failed to fetch investment categories', message: err.message });
+  }
+};
+
+/**
+ * Get investment assets by category filtered by organization
+ * GET /api/invest/org/:orgId/categories/:category/assets
+ */
+module.exports.getOrgInvestmentAssetsByCategoryCtrl = async (req, res) => {
+  try {
+    const { orgId, category } = req.params;
+    const EMISSION_FACTOR = 0.71;
+
+    const validCategories = ['solar', 'ev', 'ee'];
+    if (!validCategories.includes(category.toLowerCase())) {
+      return res.status(400).json({ error: 'Invalid category' });
+    }
+
+    const result = await query(
+      `SELECT
+        s.id,
+        s.name,
+        s.location,
+        s.category,
+        s.sites_valuation,
+        s.estimated_annual_income,
+        COUNT(DISTINCT m.id) as meter_count,
+        COALESCE(MAX(latest_data.peak_power_w), 0) as peak_power_w,
+        COALESCE(MAX(latest_data.total_energy_kwh), 0) as total_energy_kwh,
+        COALESCE(MAX(latest_data.latest_timestamp), now()) as latest_timestamp
+       FROM sites s
+       LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
+       LEFT JOIN LATERAL (
+         SELECT
+           MAX(tr.power_total_w) as peak_power_w,
+           (MAX(tr.energy_exp_l1_wh + tr.energy_exp_l2_wh + tr.energy_exp_l3_wh) / 1000.0) as total_energy_kwh,
+           MAX(tb.interval_end) as latest_timestamp
+         FROM telemetry_raw tr
+         JOIN telemetry_batches tb ON tr.batch_id = tb.id
+         WHERE tb.meter_id = m.id AND tb.status = 'VALIDATED'
+       ) latest_data ON true
+       WHERE UPPER(s.category::text) = UPPER($1)
+         AND s.status = 'active'
+         AND COALESCE(s.show_in_invest, true) = true
+         AND s.organization_id = $2
+       GROUP BY s.id, s.name, s.location, s.category, s.sites_valuation, s.estimated_annual_income
+       ORDER BY s.name`,
+      [category, orgId]
+    );
+
+    const assets = result.rows.map((row) => {
+      const totalEnergyKwh = parseFloat(row.total_energy_kwh) || 0;
+      const peakPowerKw = (parseFloat(row.peak_power_w) || 0) / 1000;
+      const co2OffsetTons = (totalEnergyKwh * EMISSION_FACTOR) / 1000;
+
+      const valuation = parseFloat(row.sites_valuation) || Math.round(totalEnergyKwh * 0.5);
+      const estimatedAnnualIncome = row.estimated_annual_income != null ? parseFloat(row.estimated_annual_income) : null;
+
+      let apy;
+      if (valuation > 0 && estimatedAnnualIncome != null && !Number.isNaN(estimatedAnnualIncome)) {
+        apy = parseFloat(((estimatedAnnualIncome / valuation) * 100).toFixed(2));
+      } else {
+        const apyRanges = {
+          solar: { min: 10, max: 12 },
+          ev: { min: 6, max: 20 },
+          ee: { min: 8, max: 15 }
+        };
+        const apyRange = apyRanges[category.toLowerCase()] || { min: 8, max: 12 };
+        apy = (apyRange.min + apyRange.max) / 2;
+      }
+
+      return {
+        id: row.id,
+        name: row.name,
+        location: row.location,
+        category: row.category.toLowerCase(),
+        valuation: valuation,
+        status: parseInt(row.meter_count) > 0 ? 'Live' : 'Pilot',
+        apy: apy,
+        peakPowerKw: parseFloat(peakPowerKw.toFixed(2)),
+        totalEnergyKwh: parseFloat(totalEnergyKwh.toFixed(2)),
+        co2OffsetTons: parseFloat(co2OffsetTons.toFixed(2)),
+        activeMeters: parseInt(row.meter_count) || 0,
+        lastUpdated: row.latest_timestamp,
+      };
+    });
+
+    res.json(assets);
+  } catch (err) {
+    console.error('[API] Error getting org investment assets by category:', err);
+    res.status(500).json({ error: 'Failed to fetch investment assets', message: err.message });
+  }
+};

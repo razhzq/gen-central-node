@@ -18,6 +18,8 @@ const {
   getInvestmentCategoriesCtrl,
   getInvestmentAssetsByCategoryCtrl,
   getInvestmentAssetDetailsCtrl,
+  getOrgInvestmentCategoriesCtrl,
+  getOrgInvestmentAssetsByCategoryCtrl,
 } = require('../components/controller/api.controller');
 const {
   createOrUpdateUserCtrl,
@@ -133,6 +135,10 @@ coreRouter.get('/api/network/growth', getNetworkGrowthCtrl);
 coreRouter.get('/api/invest/categories', getInvestmentCategoriesCtrl);
 coreRouter.get('/api/invest/categories/:category/assets', getInvestmentAssetsByCategoryCtrl);
 coreRouter.get('/api/invest/assets/:assetId', getInvestmentAssetDetailsCtrl);
+
+// Org-filtered investment endpoints (white-label portal)
+coreRouter.get('/api/invest/org/:orgId/categories', getOrgInvestmentCategoriesCtrl);
+coreRouter.get('/api/invest/org/:orgId/categories/:category/assets', getOrgInvestmentAssetsByCategoryCtrl);
 
 // User/Profile API endpoints
 coreRouter.post('/api/users', createOrUpdateUserCtrl);
