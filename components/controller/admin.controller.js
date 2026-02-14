@@ -1237,20 +1237,29 @@ module.exports.approveAssetOwnerRequestCtrl = async (req, res) => {
       [checkerId, id]
     );
 
-    // Upgrade user to maker role (so they can create/manage assets)
+    // Create organization for the maker (they set up branding later via admin portal)
+    const orgId = uuidv4();
+    await client.query(
+      `INSERT INTO organizations (id, name, org_type, created_at)
+       VALUES ($1, $2, 'ASSET_OWNER', NOW())`,
+      [orgId, request.contact_email]
+    );
+
+    // Upgrade user to maker role and link to organization
     await client.query(
       `UPDATE users
        SET user_type = 'maker',
+           organization_id = $1,
            updated_at = NOW()
-       WHERE id = $1`,
-      [request.user_id]
+       WHERE id = $2`,
+      [orgId, request.user_id]
     );
 
     await client.query('COMMIT');
 
     res.json({
       success: true,
-      message: 'Asset owner request approved. User upgraded to maker role.',
+      message: 'Asset owner request approved. User upgraded to maker role with organization created.',
     });
   } catch (err) {
     await client.query('ROLLBACK');
