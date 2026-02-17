@@ -4,6 +4,37 @@ const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
 const gcpKms = require('../kms/gcp');
 
+/**
+ * Convert a GCP KMS Ed25519 public key PEM to a Solana-compatible base58 address.
+ * Ed25519 SubjectPublicKeyInfo DER = 12-byte header + 32-byte raw key.
+ * Solana addresses are base58-encoded 32-byte Ed25519 public keys.
+ */
+function pemToSolanaAddress(pem) {
+  if (!pem) return null;
+  try {
+    const b64 = pem.replace(/-----[^-]+-----/g, '').replace(/\s/g, '');
+    const der = Buffer.from(b64, 'base64');
+    const rawKey = der.slice(-32); // last 32 bytes = raw Ed25519 pubkey
+
+    // Base58 encoding (Bitcoin/Solana alphabet)
+    const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+    let num = BigInt('0x' + rawKey.toString('hex'));
+    let encoded = '';
+    while (num > 0n) {
+      encoded = ALPHABET[Number(num % 58n)] + encoded;
+      num = num / 58n;
+    }
+    // Leading zero bytes → leading '1's
+    for (const byte of rawKey) {
+      if (byte !== 0) break;
+      encoded = '1' + encoded;
+    }
+    return encoded;
+  } catch {
+    return null;
+  }
+}
+
 // Ensure uploads directory exists
 const UPLOADS_DIR = process.env.UPLOAD_DIR || './uploads/receipts';
 if (!fs.existsSync(UPLOADS_DIR)) {
@@ -887,8 +918,13 @@ module.exports.getMetersCtrl = async (req, res) => {
     );
     const total = parseInt(countResult.rows[0]?.total || '0', 10);
 
+    const meters = result.rows.map(m => ({
+      ...m,
+      solana_address: pemToSolanaAddress(m.gcp_public_key),
+    }));
+
     res.json({
-      meters: result.rows,
+      meters,
       total,
       limit,
       offset,
