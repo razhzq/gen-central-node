@@ -2,6 +2,7 @@ const { query, pool } = require('../../db');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
+const gcpKms = require('../kms/gcp');
 
 // Ensure uploads directory exists
 const UPLOADS_DIR = process.env.UPLOAD_DIR || './uploads/receipts';
@@ -858,7 +859,7 @@ module.exports.getMetersCtrl = async (req, res) => {
     const whereClause = unlinkedOnly ? ' WHERE m.site_id IS NULL' : '';
 
     const result = await query(
-      `SELECT 
+      `SELECT
         m.id,
         m.site_id,
         m.meter_identifier,
@@ -867,6 +868,9 @@ module.exports.getMetersCtrl = async (req, res) => {
         m.firmware_version,
         m.active,
         m.installed_at,
+        m.gcp_key_id,
+        m.gcp_public_key,
+        m.key_status,
         s.name as site_name,
         s.location as site_location
        FROM meters m
@@ -929,6 +933,95 @@ module.exports.linkMeterToSiteCtrl = async (req, res) => {
   } catch (err) {
     console.error('[ADMIN] Error linking meter to site:', err);
     res.status(500).json({ error: 'Failed to link meter', message: err.message });
+  }
+};
+
+/**
+ * Create a GCP KMS Ed25519 signing key for a meter (Checker only)
+ * POST /api/admin/meters/:meterId/signing-key
+ */
+module.exports.createMeterSigningKeyCtrl = async (req, res) => {
+  try {
+    const { meterId } = req.params;
+
+    // Check meter exists
+    const meterRes = await query(
+      'SELECT id, key_status, gcp_key_id FROM meters WHERE id = $1',
+      [meterId]
+    );
+    if (meterRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Meter not found' });
+    }
+
+    const meter = meterRes.rows[0];
+    if (meter.key_status === 'authorized') {
+      return res.status(409).json({ error: 'Meter already has an active signing key. Revoke it first.' });
+    }
+
+    // Create key in GCP KMS
+    const { keyVersionName, publicKeyPem } = await gcpKms.createMeterKey(meterId);
+
+    // Persist in DB
+    const result = await query(
+      `UPDATE meters
+       SET gcp_key_id = $1, gcp_public_key = $2, key_status = 'authorized'
+       WHERE id = $3
+       RETURNING id, meter_identifier, gcp_key_id, gcp_public_key, key_status`,
+      [keyVersionName, publicKeyPem, meterId]
+    );
+
+    res.status(201).json({
+      success: true,
+      message: 'Signing key created and authorized',
+      meter: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error creating meter signing key:', err);
+    res.status(500).json({ error: 'Failed to create signing key', message: err.message });
+  }
+};
+
+/**
+ * Revoke a meter's GCP KMS signing key (Checker only)
+ * DELETE /api/admin/meters/:meterId/signing-key
+ */
+module.exports.revokeMeterSigningKeyCtrl = async (req, res) => {
+  try {
+    const { meterId } = req.params;
+
+    const meterRes = await query(
+      'SELECT id, gcp_key_id, key_status FROM meters WHERE id = $1',
+      [meterId]
+    );
+    if (meterRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Meter not found' });
+    }
+
+    const meter = meterRes.rows[0];
+    if (meter.key_status !== 'authorized' || !meter.gcp_key_id) {
+      return res.status(400).json({ error: 'No active signing key to revoke' });
+    }
+
+    // Destroy key version in GCP KMS
+    await gcpKms.revokeMeterKey(meter.gcp_key_id);
+
+    // Update DB
+    const result = await query(
+      `UPDATE meters
+       SET key_status = 'revoked'
+       WHERE id = $1
+       RETURNING id, meter_identifier, gcp_key_id, key_status`,
+      [meterId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Signing key revoked. The key will be destroyed after the GCP grace period.',
+      meter: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error revoking meter signing key:', err);
+    res.status(500).json({ error: 'Failed to revoke signing key', message: err.message });
   }
 };
 

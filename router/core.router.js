@@ -54,6 +54,8 @@ const {
   updateAssetVisibilityCtrl,
   getMetersCtrl,
   linkMeterToSiteCtrl,
+  createMeterSigningKeyCtrl,
+  revokeMeterSigningKeyCtrl,
   getMyAssetRequestsCtrl,
   getAssetOwnerRequestsCtrl,
   approveAssetOwnerRequestCtrl,
@@ -191,6 +193,8 @@ coreRouter.put('/api/admin/assets/:siteId/visibility', requireChecker, updateAss
 
 coreRouter.get('/api/admin/meters', requireChecker, getMetersCtrl);
 coreRouter.put('/api/admin/meters/:meterId/site', requireChecker, linkMeterToSiteCtrl);
+coreRouter.post('/api/admin/meters/:meterId/signing-key', requireChecker, createMeterSigningKeyCtrl);
+coreRouter.delete('/api/admin/meters/:meterId/signing-key', requireChecker, revokeMeterSigningKeyCtrl);
 
 // Asset request creation (Maker or Checker)
 coreRouter.post('/api/admin/assets/request', requireMakerOrChecker, createAssetRequestCtrl);
