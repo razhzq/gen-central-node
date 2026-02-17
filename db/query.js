@@ -36,13 +36,15 @@ module.exports.registerMeter = async (data) => {
         );
 
         if (existing.rowCount > 0) {
-            // Re-registration: update iot_pubkey, firmware, installed_at; do not overwrite site_id (admin links in UI)
-            await query(
+            // Re-registration: update iot_pubkey, firmware, installed_at; do not overwrite site_id or gcp keys
+            const updated = await query(
                 `UPDATE meters SET iot_pubkey = $1, firmware_version = $2, active = true, installed_at = now()
-                 WHERE meter_identifier = $3`,
+                 WHERE meter_identifier = $3
+                 RETURNING id, gcp_key_id, key_status`,
                 [iot_pubkey, firmware_version || null, meter_identifier]
             );
-            return existing.rows[0].id;
+            const row = updated.rows[0];
+            return { meter_id: row.id, gcp_key_id: row.gcp_key_id || null, key_status: row.key_status };
         }
 
         const id = meter_id || require('crypto').randomUUID();
@@ -67,7 +69,7 @@ module.exports.registerMeter = async (data) => {
             ]
         );
 
-        return id;
+        return { meter_id: id, gcp_key_id: null, key_status: 'pending' };
     } catch (err) {
         console.log('error registering meter: ', err);
         throw err;
