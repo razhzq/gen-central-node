@@ -285,8 +285,9 @@ module.exports.getAllAssetsCtrl = async (req, res) => {
  */
 module.exports.createAssetRequestCtrl = async (req, res) => {
   try {
-    const { 
+    const {
       name, location, timezone, category, valuation, organizationId,
+      latitude, longitude,
       // Extended fields
       description, imageUrl, imageUrls, assetType, portfolioToken, tokenPrice,
       revenueModel, estimatedAnnualIncome, contractTerm, contractDueDate,
@@ -330,9 +331,9 @@ module.exports.createAssetRequestCtrl = async (req, res) => {
         installation_type, technology_type, num_panels, peak_power_kw, peak_sun_hours, expected_annual_output,
         tariff_rate, tariff_currency, tariff_escalation,
         yield_investor_pct, yield_maintenance_pct, yield_platform_pct, yield_treasury_pct,
-        show_in_invest, show_in_console)
+        show_in_invest, show_in_console, latitude, longitude)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(),
-        $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
+        $10, $11, $12::jsonb, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36)
        RETURNING *`,
       [
         siteId, name, location, timezone || 'UTC', category.toUpperCase(),
@@ -343,7 +344,7 @@ module.exports.createAssetRequestCtrl = async (req, res) => {
         peakSunHours || 4.5, expectedAnnualOutput || null,
         tariffRate || null, tariffCurrency || 'USD', tariffEscalation || null,
         yieldInvestorPct || 60, yieldMaintenancePct || 10, yieldPlatformPct || 10, yieldTreasuryPct || 20,
-        false, isChecker
+        false, isChecker, latitude || null, longitude || null
       ]
     );
 
@@ -365,8 +366,9 @@ module.exports.createAssetRequestCtrl = async (req, res) => {
  */
 module.exports.createAssetCtrl = async (req, res) => {
   try {
-    const { 
+    const {
       name, location, timezone, category, valuation, organizationId,
+      latitude, longitude,
       // Extended fields
       description, imageUrl, imageUrls, assetType, portfolioToken, tokenPrice,
       revenueModel, estimatedAnnualIncome, contractTerm, contractDueDate,
@@ -408,9 +410,9 @@ module.exports.createAssetCtrl = async (req, res) => {
         installation_type, technology_type, num_panels, peak_power_kw, peak_sun_hours, expected_annual_output,
         tariff_rate, tariff_currency, tariff_escalation,
         yield_investor_pct, yield_maintenance_pct, yield_platform_pct, yield_treasury_pct,
-        show_in_invest, show_in_console)
+        show_in_invest, show_in_console, latitude, longitude)
        VALUES ($1, $2, $3, $4, $5, $6, $7, 'active', $8, NOW(),
-        $9, $10, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
+        $9, $10, $11::jsonb, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35)
        RETURNING *`,
       [
         siteId, name, location, timezone || 'UTC', category.toUpperCase(),
@@ -421,7 +423,7 @@ module.exports.createAssetCtrl = async (req, res) => {
         peakSunHours || 4.5, expectedAnnualOutput || null,
         tariffRate || null, tariffCurrency || 'USD', tariffEscalation || null,
         yieldInvestorPct || 60, yieldMaintenancePct || 10, yieldPlatformPct || 10, yieldTreasuryPct || 20,
-        false, true
+        false, true, latitude || null, longitude || null
       ]
     );
 
@@ -609,6 +611,7 @@ module.exports.updateAssetCtrl = async (req, res) => {
     const { siteId } = req.params;
     const {
       name, location, timezone, category, valuation,
+      latitude, longitude,
       description, imageUrl, imageUrls, assetType, portfolioToken, tokenPrice,
       revenueModel, estimatedAnnualIncome, contractTerm, contractDueDate,
       installationType, technologyType, numPanels, peakPowerKw,
@@ -744,6 +747,14 @@ module.exports.updateAssetCtrl = async (req, res) => {
     if (showInInvest !== undefined) {
       updates.push(`show_in_invest = $${paramIndex++}`);
       values.push(showInInvest);
+    }
+    if (latitude !== undefined) {
+      updates.push(`latitude = $${paramIndex++}`);
+      values.push(latitude !== null ? parseFloat(latitude) : null);
+    }
+    if (longitude !== undefined) {
+      updates.push(`longitude = $${paramIndex++}`);
+      values.push(longitude !== null ? parseFloat(longitude) : null);
     }
     if (showInConsole !== undefined) {
       updates.push(`show_in_console = $${paramIndex++}`);

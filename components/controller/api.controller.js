@@ -6,10 +6,12 @@ const { query } = require('../../db');
 module.exports.getLocationsCtrl = async (req, res) => {
   try {
     const result = await query(
-      `SELECT 
+      `SELECT
         s.id as site_id,
         s.name as site_name,
         s.location,
+        s.latitude,
+        s.longitude,
         m.id as meter_id,
         m.meter_identifier,
         m.iot_pubkey,
@@ -18,7 +20,7 @@ module.exports.getLocationsCtrl = async (req, res) => {
       FROM sites s
       LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
       LEFT JOIN telemetry_batches tb ON m.id = tb.meter_id
-      GROUP BY s.id, s.name, s.location, m.id, m.meter_identifier, m.iot_pubkey, m.active
+      GROUP BY s.id, s.name, s.location, s.latitude, s.longitude, m.id, m.meter_identifier, m.iot_pubkey, m.active
       ORDER BY s.name, m.meter_identifier`
     );
 
@@ -30,6 +32,8 @@ module.exports.getLocationsCtrl = async (req, res) => {
           id: row.site_id,
           name: row.site_name,
           location: row.location,
+          latitude: row.latitude != null ? parseFloat(row.latitude) : null,
+          longitude: row.longitude != null ? parseFloat(row.longitude) : null,
           meters: [],
         };
       }
@@ -59,10 +63,12 @@ module.exports.getAllLocationsMetricsCtrl = async (req, res) => {
   try {
     // Get all sites with their active meters, including category and organization
     const sitesRes = await query(
-      `SELECT 
+      `SELECT
         s.id,
         s.name,
         s.location,
+        s.latitude,
+        s.longitude,
         s.category,
         o.name as organization_name,
         m.id as meter_id,
@@ -81,6 +87,8 @@ module.exports.getAllLocationsMetricsCtrl = async (req, res) => {
           site_id: row.id,
           site_name: row.name,
           location: row.location,
+          latitude: row.latitude != null ? parseFloat(row.latitude) : null,
+          longitude: row.longitude != null ? parseFloat(row.longitude) : null,
           category: row.category,
           organization_name: row.organization_name,
           meter_ids: [],
