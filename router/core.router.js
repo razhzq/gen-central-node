@@ -72,6 +72,11 @@ const {
   getMyBrandingCtrl,
   updateMyBrandingCtrl,
   getOrgBrandingCtrl,
+  createAssetEditRequestCtrl,
+  getAssetEditRequestsCtrl,
+  getMyAssetEditRequestsCtrl,
+  approveAssetEditRequestCtrl,
+  rejectAssetEditRequestCtrl,
 } = require('../components/controller/admin.controller');
 const {
   requireChecker,
@@ -186,7 +191,7 @@ coreRouter.post('/api/admin/assets/:siteId/reject', requireChecker, rejectAssetC
 // Asset management (Checker only)
 coreRouter.get('/api/admin/assets', requireChecker, getAllAssetsCtrl);
 coreRouter.post('/api/admin/assets', requireChecker, createAssetCtrl);
-coreRouter.get('/api/admin/assets/:siteId', requireChecker, getAssetByIdCtrl);
+coreRouter.get('/api/admin/assets/:siteId', requireMakerOrChecker, getAssetByIdCtrl);
 coreRouter.put('/api/admin/assets/:siteId', requireChecker, updateAssetCtrl);
 coreRouter.put('/api/admin/assets/:siteId/status', requireChecker, updateAssetStatusCtrl);
 coreRouter.put('/api/admin/assets/:siteId/visibility', requireChecker, updateAssetVisibilityCtrl);
@@ -223,8 +228,15 @@ coreRouter.get('/api/admin/users', requireChecker, getAllUsersCtrl);
 coreRouter.put('/api/admin/users/:userId/type', requireChecker, updateUserTypeCtrl);
 coreRouter.post('/api/admin/users/:userId/balance', requireChecker, adjustUserBalanceCtrl);
 
+// Asset edit requests (Maker-Checker pattern)
+coreRouter.post('/api/admin/assets/:siteId/edit-request', requireMakerOrChecker, createAssetEditRequestCtrl);
+coreRouter.get('/api/admin/asset-edit-requests', requireChecker, getAssetEditRequestsCtrl);
+coreRouter.get('/api/admin/my-edit-requests', requireMakerOrChecker, getMyAssetEditRequestsCtrl);
+coreRouter.post('/api/admin/asset-edit-requests/:requestId/approve', requireChecker, approveAssetEditRequestCtrl);
+coreRouter.post('/api/admin/asset-edit-requests/:requestId/reject', requireChecker, rejectAssetEditRequestCtrl);
+
 // Node registration
-coreRouter.post('/node/register', 
+coreRouter.post('/node/register',
     (...args) => registerNodeCtrl(...args)
 )
 

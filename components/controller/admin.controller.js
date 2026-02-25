@@ -1764,3 +1764,343 @@ module.exports.getOrgBrandingCtrl = async (req, res) => {
     res.status(500).json({ error: 'Failed to get org branding', message: err.message });
   }
 };
+
+// ============================================
+// ASSET EDIT REQUESTS (Maker-Checker Pattern)
+// ============================================
+
+// Map camelCase body keys to snake_case DB columns
+const editFieldMap = {
+  name: 'name',
+  location: 'location',
+  timezone: 'timezone',
+  category: 'category',
+  valuation: 'sites_valuation',
+  latitude: 'latitude',
+  longitude: 'longitude',
+  description: 'description',
+  imageUrl: 'image_url',
+  imageUrls: 'image_urls',
+  assetType: 'asset_type',
+  portfolioToken: 'portfolio_token',
+  tokenPrice: 'token_price',
+  revenueModel: 'revenue_model',
+  estimatedAnnualIncome: 'estimated_annual_income',
+  contractTerm: 'contract_term',
+  contractDueDate: 'contract_due_date',
+  installationType: 'installation_type',
+  technologyType: 'technology_type',
+  numPanels: 'num_panels',
+  peakPowerKw: 'peak_power_kw',
+  peakSunHours: 'peak_sun_hours',
+  expectedAnnualOutput: 'expected_annual_output',
+  tariffRate: 'tariff_rate',
+  tariffCurrency: 'tariff_currency',
+  tariffEscalation: 'tariff_escalation',
+  yieldInvestorPct: 'yield_investor_pct',
+  yieldMaintenancePct: 'yield_maintenance_pct',
+  yieldPlatformPct: 'yield_platform_pct',
+  yieldTreasuryPct: 'yield_treasury_pct',
+  showInInvest: 'show_in_invest',
+  showInConsole: 'show_in_console',
+};
+
+/**
+ * Create asset edit request (Maker or Checker)
+ * POST /api/admin/assets/:siteId/edit-request
+ * If checker: auto-approve and apply changes directly.
+ */
+module.exports.createAssetEditRequestCtrl = async (req, res) => {
+  try {
+    const { siteId } = req.params;
+    const walletAddress = req.user.wallet_address;
+
+    // Fetch current asset values
+    const siteResult = await query(`SELECT * FROM sites WHERE id = $1`, [siteId]);
+    if (siteResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Asset not found' });
+    }
+    const site = siteResult.rows[0];
+
+    // Compute proposed_changes and original_values (only changed fields)
+    const proposedChanges = {};
+    const originalValues = {};
+
+    for (const [bodyKey, dbCol] of Object.entries(editFieldMap)) {
+      if (req.body[bodyKey] !== undefined) {
+        const newVal = req.body[bodyKey];
+        const oldVal = site[dbCol];
+
+        // Normalize for comparison
+        const normalizedNew = JSON.stringify(newVal);
+        const normalizedOld = JSON.stringify(oldVal);
+
+        if (normalizedNew !== normalizedOld) {
+          proposedChanges[bodyKey] = newVal;
+          originalValues[bodyKey] = oldVal;
+        }
+      }
+    }
+
+    if (Object.keys(proposedChanges).length === 0) {
+      return res.status(400).json({ error: 'No changes detected' });
+    }
+
+    // If checker, auto-approve: apply changes directly
+    if (req.user.user_type === 'checker') {
+      // Use the existing updateAsset logic
+      const updates = [];
+      const values = [];
+      let paramIndex = 1;
+
+      for (const [bodyKey, newVal] of Object.entries(proposedChanges)) {
+        const dbCol = editFieldMap[bodyKey];
+        if (dbCol === 'image_urls') {
+          const urls = Array.isArray(newVal) ? newVal.filter(Boolean) : [];
+          updates.push(`image_urls = $${paramIndex++}::jsonb`);
+          values.push(JSON.stringify(urls));
+          updates.push(`image_url = $${paramIndex++}`);
+          values.push(urls.length > 0 ? urls[0] : null);
+        } else {
+          updates.push(`${dbCol} = $${paramIndex++}`);
+          values.push(newVal);
+        }
+      }
+
+      values.push(siteId);
+      await query(
+        `UPDATE sites SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${paramIndex}`,
+        values
+      );
+
+      // Also record the edit request as auto-approved
+      await query(
+        `INSERT INTO asset_edit_requests (site_id, requested_by, status, proposed_changes, original_values, reviewed_by)
+         VALUES ($1, $2, 'approved', $3, $4, $5)`,
+        [siteId, walletAddress, JSON.stringify(proposedChanges), JSON.stringify(originalValues), walletAddress]
+      );
+
+      return res.json({
+        success: true,
+        message: 'Changes applied directly (checker auto-approved)',
+      });
+    }
+
+    // Maker: create pending edit request
+    const result = await query(
+      `INSERT INTO asset_edit_requests (site_id, requested_by, status, proposed_changes, original_values)
+       VALUES ($1, $2, 'pending', $3, $4)
+       RETURNING *`,
+      [siteId, walletAddress, JSON.stringify(proposedChanges), JSON.stringify(originalValues)]
+    );
+
+    res.json({
+      success: true,
+      message: 'Edit request submitted for approval',
+      editRequest: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error creating asset edit request:', err);
+    res.status(500).json({ error: 'Failed to create edit request', message: err.message });
+  }
+};
+
+/**
+ * Get all asset edit requests (Checker only)
+ * GET /api/admin/asset-edit-requests?status=pending
+ */
+module.exports.getAssetEditRequestsCtrl = async (req, res) => {
+  try {
+    const status = req.query.status || 'pending';
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+
+    const result = await query(
+      `SELECT
+        aer.id,
+        aer.site_id,
+        aer.requested_by,
+        aer.status,
+        aer.proposed_changes,
+        aer.original_values,
+        aer.reviewed_by,
+        aer.review_note,
+        aer.created_at,
+        aer.updated_at,
+        s.name as asset_name,
+        s.category as asset_category
+       FROM asset_edit_requests aer
+       JOIN sites s ON aer.site_id = s.id
+       WHERE aer.status = $1
+       ORDER BY aer.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [status, limit, offset]
+    );
+
+    const countResult = await query(
+      `SELECT COUNT(*) as total FROM asset_edit_requests WHERE status = $1`,
+      [status]
+    );
+
+    res.json({
+      requests: result.rows,
+      total: parseInt(countResult.rows[0].total),
+      limit,
+      offset,
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error getting asset edit requests:', err);
+    res.status(500).json({ error: 'Failed to get edit requests', message: err.message });
+  }
+};
+
+/**
+ * Get maker's own edit requests
+ * GET /api/admin/my-edit-requests
+ */
+module.exports.getMyAssetEditRequestsCtrl = async (req, res) => {
+  try {
+    const walletAddress = req.user.wallet_address;
+    const limit = parseInt(req.query.limit) || 50;
+    const offset = parseInt(req.query.offset) || 0;
+
+    const result = await query(
+      `SELECT
+        aer.id,
+        aer.site_id,
+        aer.requested_by,
+        aer.status,
+        aer.proposed_changes,
+        aer.original_values,
+        aer.reviewed_by,
+        aer.review_note,
+        aer.created_at,
+        aer.updated_at,
+        s.name as asset_name,
+        s.category as asset_category
+       FROM asset_edit_requests aer
+       JOIN sites s ON aer.site_id = s.id
+       WHERE aer.requested_by = $1
+       ORDER BY aer.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [walletAddress, limit, offset]
+    );
+
+    res.json({ requests: result.rows });
+  } catch (err) {
+    console.error('[ADMIN] Error getting my edit requests:', err);
+    res.status(500).json({ error: 'Failed to get edit requests', message: err.message });
+  }
+};
+
+/**
+ * Approve asset edit request (Checker only)
+ * POST /api/admin/asset-edit-requests/:requestId/approve
+ */
+module.exports.approveAssetEditRequestCtrl = async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { requestId } = req.params;
+    const reviewerWallet = req.user.wallet_address;
+    const { note } = req.body;
+
+    await client.query('BEGIN');
+
+    // Get the pending request
+    const requestResult = await client.query(
+      `SELECT * FROM asset_edit_requests WHERE id = $1 AND status = 'pending'`,
+      [requestId]
+    );
+
+    if (requestResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Edit request not found or already processed' });
+    }
+
+    const editRequest = requestResult.rows[0];
+    const proposedChanges = editRequest.proposed_changes;
+
+    // Apply proposed_changes to the sites table
+    const updates = [];
+    const values = [];
+    let paramIndex = 1;
+
+    for (const [bodyKey, newVal] of Object.entries(proposedChanges)) {
+      const dbCol = editFieldMap[bodyKey];
+      if (!dbCol) continue;
+      if (dbCol === 'image_urls') {
+        const urls = Array.isArray(newVal) ? newVal.filter(Boolean) : [];
+        updates.push(`image_urls = $${paramIndex++}::jsonb`);
+        values.push(JSON.stringify(urls));
+        updates.push(`image_url = $${paramIndex++}`);
+        values.push(urls.length > 0 ? urls[0] : null);
+      } else {
+        updates.push(`${dbCol} = $${paramIndex++}`);
+        values.push(newVal);
+      }
+    }
+
+    if (updates.length > 0) {
+      values.push(editRequest.site_id);
+      await client.query(
+        `UPDATE sites SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${paramIndex}`,
+        values
+      );
+    }
+
+    // Mark request as approved
+    await client.query(
+      `UPDATE asset_edit_requests
+       SET status = 'approved', reviewed_by = $1, review_note = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [reviewerWallet, note || null, requestId]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: 'Edit request approved and changes applied',
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[ADMIN] Error approving asset edit request:', err);
+    res.status(500).json({ error: 'Failed to approve edit request', message: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * Reject asset edit request (Checker only)
+ * POST /api/admin/asset-edit-requests/:requestId/reject
+ * Body: { note }
+ */
+module.exports.rejectAssetEditRequestCtrl = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const { note } = req.body;
+    const reviewerWallet = req.user.wallet_address;
+
+    const result = await query(
+      `UPDATE asset_edit_requests
+       SET status = 'rejected', reviewed_by = $1, review_note = $2, updated_at = NOW()
+       WHERE id = $3 AND status = 'pending'
+       RETURNING *`,
+      [reviewerWallet, note || null, requestId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Edit request not found or already processed' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Edit request rejected',
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error rejecting asset edit request:', err);
+    res.status(500).json({ error: 'Failed to reject edit request', message: err.message });
+  }
+};
