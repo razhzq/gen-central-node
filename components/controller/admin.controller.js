@@ -1260,12 +1260,16 @@ module.exports.getAdminStatsCtrl = async (req, res) => {
       totalUsers,
       activeAssets,
       pendingAssetOwners,
+      pendingDeviceOrders,
+      pendingMeterLinks,
     ] = await Promise.all([
       query(`SELECT COUNT(*) as count FROM deposit_requests WHERE status = 'pending'`),
       query(`SELECT COUNT(*) as count FROM sites WHERE status = 'pending'`),
       query(`SELECT COUNT(*) as count FROM users`),
       query(`SELECT COUNT(*) as count FROM sites WHERE status = 'active'`),
       query(`SELECT COUNT(*) as count FROM asset_owner_requests WHERE status = 'pending'`),
+      query(`SELECT COUNT(*) as count FROM device_orders WHERE status = 'pending_approval'`),
+      query(`SELECT COUNT(*) as count FROM meter_link_requests WHERE status = 'pending'`),
     ]);
 
     res.json({
@@ -1274,6 +1278,8 @@ module.exports.getAdminStatsCtrl = async (req, res) => {
       totalUsers: parseInt(totalUsers.rows[0].count),
       activeAssets: parseInt(activeAssets.rows[0].count),
       pendingAssetOwners: parseInt(pendingAssetOwners.rows[0].count),
+      pendingDeviceOrders: parseInt(pendingDeviceOrders.rows[0].count),
+      pendingMeterLinks: parseInt(pendingMeterLinks.rows[0].count),
     });
   } catch (err) {
     console.error('[ADMIN] Error getting stats:', err);
@@ -2102,5 +2108,579 @@ module.exports.rejectAssetEditRequestCtrl = async (req, res) => {
   } catch (err) {
     console.error('[ADMIN] Error rejecting asset edit request:', err);
     res.status(500).json({ error: 'Failed to reject edit request', message: err.message });
+  }
+};
+
+// ============================================
+// DEVICE PURCHASE ORDERS
+// ============================================
+
+/**
+ * Get all device orders (Checker only)
+ * GET /api/admin/device-orders?status=pending_payment&limit=50&offset=0
+ */
+module.exports.getDeviceOrdersCtrl = async (req, res) => {
+  try {
+    const { status, limit = 50, offset = 0 } = req.query;
+
+    let whereClause = '';
+    const params = [];
+
+    if (status) {
+      params.push(status);
+      whereClause = `WHERE do.status = $${params.length}`;
+    }
+
+    params.push(parseInt(limit), parseInt(offset));
+
+    const countResult = await query(
+      `SELECT COUNT(*) FROM device_orders do ${whereClause}`,
+      status ? [status] : []
+    );
+
+    const result = await query(
+      `SELECT do.*, u.email as user_email, u.wallet_address as user_wallet,
+              r.email as reviewed_by_email
+       FROM device_orders do
+       JOIN users u ON do.user_id = u.id
+       LEFT JOIN users r ON do.reviewed_by = r.id
+       ${whereClause}
+       ORDER BY do.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    res.json({
+      orders: result.rows,
+      total: parseInt(countResult.rows[0].count),
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error fetching device orders:', err);
+    res.status(500).json({ error: 'Failed to fetch device orders', message: err.message });
+  }
+};
+
+/**
+ * Get maker's own device orders
+ * GET /api/admin/my-device-orders
+ */
+module.exports.getMyDeviceOrdersCtrl = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { limit = 50, offset = 0 } = req.query;
+
+    const result = await query(
+      `SELECT do.*, r.email as reviewed_by_email
+       FROM device_orders do
+       LEFT JOIN users r ON do.reviewed_by = r.id
+       WHERE do.user_id = $1
+       ORDER BY do.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, parseInt(limit), parseInt(offset)]
+    );
+
+    res.json({ orders: result.rows });
+  } catch (err) {
+    console.error('[ADMIN] Error fetching my device orders:', err);
+    res.status(500).json({ error: 'Failed to fetch orders', message: err.message });
+  }
+};
+
+/**
+ * Create a device order (Maker or Checker)
+ * POST /api/admin/device-orders
+ * Body: { quantity, deliveryAddress }
+ */
+module.exports.createDeviceOrderCtrl = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { quantity, deliveryAddress } = req.body;
+
+    if (!quantity || quantity < 1) {
+      return res.status(400).json({ error: 'Quantity must be at least 1' });
+    }
+    if (!deliveryAddress || !deliveryAddress.trim()) {
+      return res.status(400).json({ error: 'Delivery address is required' });
+    }
+
+    // Get the current unit price
+    const priceResult = await query(
+      `SELECT value FROM platform_settings WHERE key = 'gen_core_unit_price'`
+    );
+
+    const unitPrice = priceResult.rows.length > 0
+      ? parseFloat(priceResult.rows[0].value.amount)
+      : 0;
+
+    const totalAmount = unitPrice * quantity;
+
+    const result = await query(
+      `INSERT INTO device_orders (user_id, quantity, unit_price, total_amount, delivery_address, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending_payment')
+       RETURNING *`,
+      [userId, quantity, unitPrice, totalAmount, deliveryAddress.trim()]
+    );
+
+    res.json({
+      success: true,
+      message: 'Device order created',
+      order: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error creating device order:', err);
+    res.status(500).json({ error: 'Failed to create device order', message: err.message });
+  }
+};
+
+/**
+ * Upload payment receipt for a device order (Maker or Checker)
+ * POST /api/admin/device-orders/:id/receipt
+ * Multipart form with 'receipt' file
+ */
+module.exports.uploadDeviceOrderReceiptCtrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Receipt file is required' });
+    }
+
+    // Verify the order belongs to this user and is in pending_payment status
+    const orderResult = await query(
+      `SELECT * FROM device_orders WHERE id = $1 AND user_id = $2`,
+      [id, userId]
+    );
+
+    if (orderResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    if (orderResult.rows[0].status !== 'pending_payment') {
+      return res.status(400).json({ error: 'Receipt can only be uploaded for orders pending payment' });
+    }
+
+    const receiptPath = req.file.filename;
+
+    const result = await query(
+      `UPDATE device_orders
+       SET receipt_path = $1, status = 'pending_approval', updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [receiptPath, id]
+    );
+
+    res.json({
+      success: true,
+      message: 'Receipt uploaded successfully',
+      order: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error uploading device order receipt:', err);
+    res.status(500).json({ error: 'Failed to upload receipt', message: err.message });
+  }
+};
+
+/**
+ * Approve a device order (Checker only)
+ * POST /api/admin/device-orders/:id/approve
+ * Body: { notes }
+ */
+module.exports.approveDeviceOrderCtrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+    const reviewerId = req.user.id;
+
+    const result = await query(
+      `UPDATE device_orders
+       SET status = 'approved', reviewed_by = $1, reviewed_at = NOW(), notes = $2, updated_at = NOW()
+       WHERE id = $3 AND status = 'pending_approval'
+       RETURNING *`,
+      [reviewerId, notes || null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found or not pending approval' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Device order approved',
+      order: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error approving device order:', err);
+    res.status(500).json({ error: 'Failed to approve device order', message: err.message });
+  }
+};
+
+/**
+ * Reject a device order (Checker only)
+ * POST /api/admin/device-orders/:id/reject
+ * Body: { reason }
+ */
+module.exports.rejectDeviceOrderCtrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const reviewerId = req.user.id;
+
+    if (!reason) {
+      return res.status(400).json({ error: 'Rejection reason is required' });
+    }
+
+    const result = await query(
+      `UPDATE device_orders
+       SET status = 'rejected', reviewed_by = $1, reviewed_at = NOW(), rejection_reason = $2, updated_at = NOW()
+       WHERE id = $3 AND status = 'pending_approval'
+       RETURNING *`,
+      [reviewerId, reason, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found or not pending approval' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Device order rejected',
+      order: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error rejecting device order:', err);
+    res.status(500).json({ error: 'Failed to reject device order', message: err.message });
+  }
+};
+
+/**
+ * Update device order status to shipped/delivered (Checker only)
+ * PUT /api/admin/device-orders/:id/status
+ * Body: { status }
+ */
+module.exports.updateDeviceOrderStatusCtrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    if (!['shipped', 'delivered'].includes(status)) {
+      return res.status(400).json({ error: 'Status must be shipped or delivered' });
+    }
+
+    const result = await query(
+      `UPDATE device_orders
+       SET status = $1, updated_at = NOW()
+       WHERE id = $2 AND status IN ('approved', 'shipped')
+       RETURNING *`,
+      [status, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Order not found or cannot update status' });
+    }
+
+    res.json({
+      success: true,
+      message: `Order status updated to ${status}`,
+      order: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error updating device order status:', err);
+    res.status(500).json({ error: 'Failed to update order status', message: err.message });
+  }
+};
+
+// ============================================
+// GEN CORE PRICE MANAGEMENT
+// ============================================
+
+/**
+ * Get current GEN CORE unit price
+ * GET /api/admin/gen-core-price
+ */
+module.exports.getGenCorePriceCtrl = async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT ps.*, u.email as updated_by_email
+       FROM platform_settings ps
+       LEFT JOIN users u ON ps.updated_by = u.id
+       WHERE ps.key = 'gen_core_unit_price'`
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ price: { amount: 0, currency: 'MYR' }, updatedBy: null, updatedAt: null });
+    }
+
+    const row = result.rows[0];
+    res.json({
+      price: row.value,
+      updatedBy: row.updated_by_email || null,
+      updatedAt: row.updated_at,
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error fetching GEN CORE price:', err);
+    res.status(500).json({ error: 'Failed to fetch price', message: err.message });
+  }
+};
+
+/**
+ * Set GEN CORE unit price (Checker only)
+ * PUT /api/admin/gen-core-price
+ * Body: { amount, currency }
+ */
+module.exports.setGenCorePriceCtrl = async (req, res) => {
+  try {
+    const { amount, currency = 'MYR' } = req.body;
+    const userId = req.user.id;
+
+    if (amount == null || amount < 0) {
+      return res.status(400).json({ error: 'Amount must be a non-negative number' });
+    }
+
+    await query(
+      `INSERT INTO platform_settings (key, value, updated_by, updated_at)
+       VALUES ('gen_core_unit_price', $1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE
+       SET value = $1, updated_by = $2, updated_at = NOW()`,
+      [JSON.stringify({ amount: parseFloat(amount), currency }), userId]
+    );
+
+    res.json({
+      success: true,
+      message: 'GEN CORE unit price updated',
+      price: { amount: parseFloat(amount), currency },
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error setting GEN CORE price:', err);
+    res.status(500).json({ error: 'Failed to update price', message: err.message });
+  }
+};
+
+// ============================================
+// METER LINK REQUESTS
+// ============================================
+
+/**
+ * Create a meter link request (Maker or Checker)
+ * POST /api/admin/meter-link-requests
+ * Body: { meterId, siteId }
+ */
+module.exports.createMeterLinkRequestCtrl = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { meterId, siteId } = req.body;
+
+    if (!meterId || !siteId) {
+      return res.status(400).json({ error: 'Meter ID and Site ID are required' });
+    }
+
+    // Verify meter exists
+    const meterResult = await query(`SELECT * FROM meters WHERE id = $1`, [meterId]);
+    if (meterResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Meter not found' });
+    }
+
+    // Verify site exists
+    const siteResult = await query(`SELECT * FROM sites WHERE id = $1`, [siteId]);
+    if (siteResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Site not found' });
+    }
+
+    // Check for existing pending request for this meter+site
+    const existingResult = await query(
+      `SELECT * FROM meter_link_requests WHERE meter_id = $1 AND site_id = $2 AND status = 'pending'`,
+      [meterId, siteId]
+    );
+    if (existingResult.rows.length > 0) {
+      return res.status(409).json({ error: 'A pending link request already exists for this meter and site' });
+    }
+
+    const result = await query(
+      `INSERT INTO meter_link_requests (meter_id, site_id, requested_by)
+       VALUES ($1, $2, $3)
+       RETURNING *`,
+      [meterId, siteId, userId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Meter link request created',
+      request: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error creating meter link request:', err);
+    res.status(500).json({ error: 'Failed to create link request', message: err.message });
+  }
+};
+
+/**
+ * Get all meter link requests (Checker only)
+ * GET /api/admin/meter-link-requests?status=pending&limit=50&offset=0
+ */
+module.exports.getMeterLinkRequestsCtrl = async (req, res) => {
+  try {
+    const { status, limit = 50, offset = 0 } = req.query;
+
+    let whereClause = '';
+    const params = [];
+
+    if (status) {
+      params.push(status);
+      whereClause = `WHERE mlr.status = $${params.length}`;
+    }
+
+    params.push(parseInt(limit), parseInt(offset));
+
+    const countResult = await query(
+      `SELECT COUNT(*) FROM meter_link_requests mlr ${whereClause}`,
+      status ? [status] : []
+    );
+
+    const result = await query(
+      `SELECT mlr.*,
+              m.meter_identifier, m.iot_pubkey,
+              s.name as site_name, s.location as site_location,
+              u.email as requested_by_email, u.wallet_address as requested_by_wallet,
+              r.email as reviewed_by_email
+       FROM meter_link_requests mlr
+       JOIN meters m ON mlr.meter_id = m.id
+       JOIN sites s ON mlr.site_id = s.id
+       JOIN users u ON mlr.requested_by = u.id
+       LEFT JOIN users r ON mlr.reviewed_by = r.id
+       ${whereClause}
+       ORDER BY mlr.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    res.json({
+      requests: result.rows,
+      total: parseInt(countResult.rows[0].count),
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error fetching meter link requests:', err);
+    res.status(500).json({ error: 'Failed to fetch link requests', message: err.message });
+  }
+};
+
+/**
+ * Get maker's own meter link requests
+ * GET /api/admin/my-meter-link-requests
+ */
+module.exports.getMyMeterLinkRequestsCtrl = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { limit = 50, offset = 0 } = req.query;
+
+    const result = await query(
+      `SELECT mlr.*,
+              m.meter_identifier, m.iot_pubkey,
+              s.name as site_name, s.location as site_location,
+              r.email as reviewed_by_email
+       FROM meter_link_requests mlr
+       JOIN meters m ON mlr.meter_id = m.id
+       JOIN sites s ON mlr.site_id = s.id
+       LEFT JOIN users r ON mlr.reviewed_by = r.id
+       WHERE mlr.requested_by = $1
+       ORDER BY mlr.created_at DESC
+       LIMIT $2 OFFSET $3`,
+      [userId, parseInt(limit), parseInt(offset)]
+    );
+
+    res.json({ requests: result.rows });
+  } catch (err) {
+    console.error('[ADMIN] Error fetching my meter link requests:', err);
+    res.status(500).json({ error: 'Failed to fetch link requests', message: err.message });
+  }
+};
+
+/**
+ * Approve a meter link request (Checker only) — actually links the meter to the site
+ * POST /api/admin/meter-link-requests/:id/approve
+ */
+module.exports.approveMeterLinkRequestCtrl = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const reviewerId = req.user.id;
+
+    await client.query('BEGIN');
+
+    // Get the request
+    const reqResult = await client.query(
+      `SELECT * FROM meter_link_requests WHERE id = $1 AND status = 'pending'`,
+      [id]
+    );
+
+    if (reqResult.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Link request not found or already processed' });
+    }
+
+    const linkReq = reqResult.rows[0];
+
+    // Actually link the meter to the site
+    await client.query(
+      `UPDATE meters SET site_id = $1 WHERE id = $2`,
+      [linkReq.site_id, linkReq.meter_id]
+    );
+
+    // Mark request as approved
+    await client.query(
+      `UPDATE meter_link_requests
+       SET status = 'approved', reviewed_by = $1, reviewed_at = NOW()
+       WHERE id = $2`,
+      [reviewerId, id]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: 'Meter link request approved and meter linked to site',
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[ADMIN] Error approving meter link request:', err);
+    res.status(500).json({ error: 'Failed to approve link request', message: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * Reject a meter link request (Checker only)
+ * POST /api/admin/meter-link-requests/:id/reject
+ * Body: { reason }
+ */
+module.exports.rejectMeterLinkRequestCtrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const reviewerId = req.user.id;
+
+    if (!reason) {
+      return res.status(400).json({ error: 'Rejection reason is required' });
+    }
+
+    const result = await query(
+      `UPDATE meter_link_requests
+       SET status = 'rejected', reviewed_by = $1, reviewed_at = NOW(), rejection_reason = $2
+       WHERE id = $3 AND status = 'pending'
+       RETURNING *`,
+      [reviewerId, reason, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Link request not found or already processed' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Meter link request rejected',
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error rejecting meter link request:', err);
+    res.status(500).json({ error: 'Failed to reject link request', message: err.message });
   }
 };

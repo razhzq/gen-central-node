@@ -77,6 +77,20 @@ const {
   getMyAssetEditRequestsCtrl,
   approveAssetEditRequestCtrl,
   rejectAssetEditRequestCtrl,
+  getDeviceOrdersCtrl,
+  getMyDeviceOrdersCtrl,
+  createDeviceOrderCtrl,
+  uploadDeviceOrderReceiptCtrl,
+  approveDeviceOrderCtrl,
+  rejectDeviceOrderCtrl,
+  updateDeviceOrderStatusCtrl,
+  getGenCorePriceCtrl,
+  setGenCorePriceCtrl,
+  createMeterLinkRequestCtrl,
+  getMeterLinkRequestsCtrl,
+  getMyMeterLinkRequestsCtrl,
+  approveMeterLinkRequestCtrl,
+  rejectMeterLinkRequestCtrl,
 } = require('../components/controller/admin.controller');
 const {
   requireChecker,
@@ -234,6 +248,26 @@ coreRouter.get('/api/admin/asset-edit-requests', requireChecker, getAssetEditReq
 coreRouter.get('/api/admin/my-edit-requests', requireMakerOrChecker, getMyAssetEditRequestsCtrl);
 coreRouter.post('/api/admin/asset-edit-requests/:requestId/approve', requireChecker, approveAssetEditRequestCtrl);
 coreRouter.post('/api/admin/asset-edit-requests/:requestId/reject', requireChecker, rejectAssetEditRequestCtrl);
+
+// Device purchase orders
+coreRouter.get('/api/admin/device-orders', requireChecker, getDeviceOrdersCtrl);
+coreRouter.get('/api/admin/my-device-orders', requireMakerOrChecker, getMyDeviceOrdersCtrl);
+coreRouter.post('/api/admin/device-orders', requireMakerOrChecker, createDeviceOrderCtrl);
+coreRouter.post('/api/admin/device-orders/:id/receipt', requireMakerOrChecker, upload.single('receipt'), uploadDeviceOrderReceiptCtrl);
+coreRouter.post('/api/admin/device-orders/:id/approve', requireChecker, approveDeviceOrderCtrl);
+coreRouter.post('/api/admin/device-orders/:id/reject', requireChecker, rejectDeviceOrderCtrl);
+coreRouter.put('/api/admin/device-orders/:id/status', requireChecker, updateDeviceOrderStatusCtrl);
+
+// GEN CORE price
+coreRouter.get('/api/admin/gen-core-price', requireMakerOrChecker, getGenCorePriceCtrl);
+coreRouter.put('/api/admin/gen-core-price', requireChecker, setGenCorePriceCtrl);
+
+// Meter link requests
+coreRouter.post('/api/admin/meter-link-requests', requireMakerOrChecker, createMeterLinkRequestCtrl);
+coreRouter.get('/api/admin/meter-link-requests', requireChecker, getMeterLinkRequestsCtrl);
+coreRouter.get('/api/admin/my-meter-link-requests', requireMakerOrChecker, getMyMeterLinkRequestsCtrl);
+coreRouter.post('/api/admin/meter-link-requests/:id/approve', requireChecker, approveMeterLinkRequestCtrl);
+coreRouter.post('/api/admin/meter-link-requests/:id/reject', requireChecker, rejectMeterLinkRequestCtrl);
 
 // Node registration
 coreRouter.post('/node/register',
