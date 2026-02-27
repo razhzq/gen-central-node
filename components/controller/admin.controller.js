@@ -1071,8 +1071,15 @@ module.exports.getMyAssetRequestsCtrl = async (req, res) => {
     const limit = parseInt(req.query.limit) || 50;
     const offset = parseInt(req.query.offset) || 0;
 
+    // Get user's organization_id to also match org-owned sites
+    const userResult = await query(
+      `SELECT organization_id FROM users WHERE id = $1`,
+      [userId]
+    );
+    const orgId = userResult.rows[0]?.organization_id || null;
+
     const result = await query(
-      `SELECT 
+      `SELECT
         s.id,
         s.name,
         s.location,
@@ -1085,9 +1092,10 @@ module.exports.getMyAssetRequestsCtrl = async (req, res) => {
        FROM sites s
        LEFT JOIN organizations o ON s.organization_id = o.id
        WHERE s.created_by = $1
+          OR ($2::uuid IS NOT NULL AND s.organization_id = $2::uuid)
        ORDER BY s.created_at DESC
-       LIMIT $2 OFFSET $3`,
-      [userId, limit, offset]
+       LIMIT $3 OFFSET $4`,
+      [userId, orgId, limit, offset]
     );
 
     res.json({
