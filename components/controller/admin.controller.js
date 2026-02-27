@@ -2128,24 +2128,24 @@ module.exports.getDeviceOrdersCtrl = async (req, res) => {
 
     if (status) {
       params.push(status);
-      whereClause = `WHERE do.status = $${params.length}`;
+      whereClause = `WHERE dor.status = $${params.length}`;
     }
 
     params.push(parseInt(limit), parseInt(offset));
 
     const countResult = await query(
-      `SELECT COUNT(*) FROM device_orders do ${whereClause}`,
+      `SELECT COUNT(*) FROM device_orders dor ${whereClause}`,
       status ? [status] : []
     );
 
     const result = await query(
-      `SELECT do.*, u.email as user_email, u.wallet_address as user_wallet,
+      `SELECT dor.*, u.email as user_email, u.wallet_address as user_wallet,
               r.email as reviewed_by_email
-       FROM device_orders do
-       JOIN users u ON do.user_id = u.id
-       LEFT JOIN users r ON do.reviewed_by = r.id
+       FROM device_orders dor
+       JOIN users u ON dor.user_id = u.id
+       LEFT JOIN users r ON dor.reviewed_by = r.id
        ${whereClause}
-       ORDER BY do.created_at DESC
+       ORDER BY dor.created_at DESC
        LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
     );
@@ -2170,11 +2170,11 @@ module.exports.getMyDeviceOrdersCtrl = async (req, res) => {
     const { limit = 50, offset = 0 } = req.query;
 
     const result = await query(
-      `SELECT do.*, r.email as reviewed_by_email
-       FROM device_orders do
-       LEFT JOIN users r ON do.reviewed_by = r.id
-       WHERE do.user_id = $1
-       ORDER BY do.created_at DESC
+      `SELECT dor.*, r.email as reviewed_by_email
+       FROM device_orders dor
+       LEFT JOIN users r ON dor.reviewed_by = r.id
+       WHERE dor.user_id = $1
+       ORDER BY dor.created_at DESC
        LIMIT $2 OFFSET $3`,
       [userId, parseInt(limit), parseInt(offset)]
     );
