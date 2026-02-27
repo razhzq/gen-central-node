@@ -210,7 +210,7 @@ coreRouter.put('/api/admin/assets/:siteId', requireChecker, updateAssetCtrl);
 coreRouter.put('/api/admin/assets/:siteId/status', requireChecker, updateAssetStatusCtrl);
 coreRouter.put('/api/admin/assets/:siteId/visibility', requireChecker, updateAssetVisibilityCtrl);
 
-coreRouter.get('/api/admin/meters', requireChecker, getMetersCtrl);
+coreRouter.get('/api/admin/meters', requireMakerOrChecker, getMetersCtrl);
 coreRouter.put('/api/admin/meters/:meterId/site', requireChecker, linkMeterToSiteCtrl);
 coreRouter.post('/api/admin/meters/:meterId/signing-key', requireChecker, createMeterSigningKeyCtrl);
 coreRouter.delete('/api/admin/meters/:meterId/signing-key', requireChecker, revokeMeterSigningKeyCtrl);
