@@ -1,6 +1,8 @@
 const { query, pool } = require('../../db');
+const { registerMeter } = require('../../db/query');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const { v4: uuidv4 } = require('uuid');
 const gcpKms = require('../kms/gcp');
 
@@ -1270,6 +1272,7 @@ module.exports.getAdminStatsCtrl = async (req, res) => {
       pendingAssetOwners,
       pendingDeviceOrders,
       pendingMeterLinks,
+      pendingSubscriptions,
     ] = await Promise.all([
       query(`SELECT COUNT(*) as count FROM deposit_requests WHERE status = 'pending'`),
       query(`SELECT COUNT(*) as count FROM sites WHERE status = 'pending'`),
@@ -1278,6 +1281,7 @@ module.exports.getAdminStatsCtrl = async (req, res) => {
       query(`SELECT COUNT(*) as count FROM asset_owner_requests WHERE status = 'pending'`),
       query(`SELECT COUNT(*) as count FROM device_orders WHERE status = 'pending_approval'`),
       query(`SELECT COUNT(*) as count FROM meter_link_requests WHERE status = 'pending'`),
+      query(`SELECT COUNT(*) as count FROM meter_subscriptions WHERE status = 'pending_approval'`),
     ]);
 
     res.json({
@@ -1288,6 +1292,7 @@ module.exports.getAdminStatsCtrl = async (req, res) => {
       pendingAssetOwners: parseInt(pendingAssetOwners.rows[0].count),
       pendingDeviceOrders: parseInt(pendingDeviceOrders.rows[0].count),
       pendingMeterLinks: parseInt(pendingMeterLinks.rows[0].count),
+      pendingSubscriptions: parseInt(pendingSubscriptions.rows[0].count),
     });
   } catch (err) {
     console.error('[ADMIN] Error getting stats:', err);
@@ -2690,5 +2695,543 @@ module.exports.rejectMeterLinkRequestCtrl = async (req, res) => {
   } catch (err) {
     console.error('[ADMIN] Error rejecting meter link request:', err);
     res.status(500).json({ error: 'Failed to reject link request', message: err.message });
+  }
+};
+
+// ============================================
+// FEATURE FLAGS
+// ============================================
+
+/**
+ * Get all feature flags
+ * GET /api/admin/feature-flags
+ */
+module.exports.getFeatureFlagsCtrl = async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT ps.*, u.email as updated_by_email
+       FROM platform_settings ps
+       LEFT JOIN users u ON ps.updated_by = u.id
+       WHERE ps.key = 'feature_flags'`
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ flags: { feature_data_subscription: false, feature_test_meter: false }, updatedBy: null, updatedAt: null });
+    }
+
+    const row = result.rows[0];
+    res.json({
+      flags: row.value,
+      updatedBy: row.updated_by_email || null,
+      updatedAt: row.updated_at,
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error fetching feature flags:', err);
+    res.status(500).json({ error: 'Failed to fetch feature flags', message: err.message });
+  }
+};
+
+/**
+ * Set a feature flag (Checker only)
+ * PUT /api/admin/feature-flags
+ * Body: { key, value: bool }
+ */
+module.exports.setFeatureFlagCtrl = async (req, res) => {
+  try {
+    const { key, value } = req.body;
+    const userId = req.user.id;
+
+    if (!key || typeof value !== 'boolean') {
+      return res.status(400).json({ error: 'key (string) and value (boolean) are required' });
+    }
+
+    const allowedKeys = ['feature_data_subscription', 'feature_test_meter'];
+    if (!allowedKeys.includes(key)) {
+      return res.status(400).json({ error: `Invalid flag key. Allowed: ${allowedKeys.join(', ')}` });
+    }
+
+    // Use JSONB || merge to update a single key
+    await query(
+      `INSERT INTO platform_settings (key, value, updated_by, updated_at)
+       VALUES ('feature_flags', $1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE
+       SET value = platform_settings.value || $1, updated_by = $2, updated_at = NOW()`,
+      [JSON.stringify({ [key]: value }), userId]
+    );
+
+    // Return updated flags
+    const result = await query(
+      `SELECT value FROM platform_settings WHERE key = 'feature_flags'`
+    );
+
+    res.json({
+      success: true,
+      message: `Feature flag '${key}' set to ${value}`,
+      flags: result.rows[0].value,
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error setting feature flag:', err);
+    res.status(500).json({ error: 'Failed to set feature flag', message: err.message });
+  }
+};
+
+// ============================================
+// DATA SUBSCRIPTION PRICE
+// ============================================
+
+/**
+ * Get data subscription annual price
+ * GET /api/admin/subscription-price
+ */
+module.exports.getSubscriptionPriceCtrl = async (req, res) => {
+  try {
+    const result = await query(
+      `SELECT ps.*, u.email as updated_by_email
+       FROM platform_settings ps
+       LEFT JOIN users u ON ps.updated_by = u.id
+       WHERE ps.key = 'data_subscription_annual_price'`
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({ price: { amount: 0, currency: 'MYR' }, updatedBy: null, updatedAt: null });
+    }
+
+    const row = result.rows[0];
+    res.json({
+      price: row.value,
+      updatedBy: row.updated_by_email || null,
+      updatedAt: row.updated_at,
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error fetching subscription price:', err);
+    res.status(500).json({ error: 'Failed to fetch subscription price', message: err.message });
+  }
+};
+
+/**
+ * Set data subscription annual price (Checker only)
+ * PUT /api/admin/subscription-price
+ * Body: { amount, currency }
+ */
+module.exports.setSubscriptionPriceCtrl = async (req, res) => {
+  try {
+    const { amount, currency = 'MYR' } = req.body;
+    const userId = req.user.id;
+
+    if (amount == null || amount < 0) {
+      return res.status(400).json({ error: 'Amount must be a non-negative number' });
+    }
+
+    await query(
+      `INSERT INTO platform_settings (key, value, updated_by, updated_at)
+       VALUES ('data_subscription_annual_price', $1, $2, NOW())
+       ON CONFLICT (key) DO UPDATE
+       SET value = $1, updated_by = $2, updated_at = NOW()`,
+      [JSON.stringify({ amount: parseFloat(amount), currency }), userId]
+    );
+
+    res.json({
+      success: true,
+      message: 'Data subscription price updated',
+      price: { amount: parseFloat(amount), currency },
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error setting subscription price:', err);
+    res.status(500).json({ error: 'Failed to update subscription price', message: err.message });
+  }
+};
+
+// ============================================
+// METER SUBSCRIPTIONS CRUD
+// ============================================
+
+/**
+ * Create a subscription (Maker or Checker)
+ * POST /api/admin/subscriptions
+ * Body: { meterId, year? }
+ */
+module.exports.createSubscriptionCtrl = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { meterId, year } = req.body;
+    const subYear = year || new Date().getFullYear();
+
+    if (!meterId) {
+      return res.status(400).json({ error: 'meterId is required' });
+    }
+
+    // Validate meter exists and is linked to a site
+    const meterResult = await query(
+      `SELECT m.id, m.site_id FROM meters m WHERE m.id = $1`,
+      [meterId]
+    );
+
+    if (meterResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Meter not found' });
+    }
+
+    if (!meterResult.rows[0].site_id) {
+      return res.status(400).json({ error: 'Meter must be linked to a site before subscribing' });
+    }
+
+    // Check for duplicate active subscription
+    const existingResult = await query(
+      `SELECT id, status FROM meter_subscriptions
+       WHERE meter_id = $1 AND year = $2 AND status NOT IN ('rejected', 'expired')`,
+      [meterId, subYear]
+    );
+
+    if (existingResult.rows.length > 0) {
+      return res.status(400).json({ error: 'An active or pending subscription already exists for this meter and year' });
+    }
+
+    // Lock price at creation time
+    const priceResult = await query(
+      `SELECT value FROM platform_settings WHERE key = 'data_subscription_annual_price'`
+    );
+
+    const price = priceResult.rows.length > 0
+      ? priceResult.rows[0].value
+      : { amount: 0, currency: 'MYR' };
+
+    const result = await query(
+      `INSERT INTO meter_subscriptions (user_id, meter_id, year, amount, currency, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending_payment')
+       RETURNING *`,
+      [userId, meterId, subYear, parseFloat(price.amount), price.currency]
+    );
+
+    res.json({
+      success: true,
+      message: 'Subscription created',
+      subscription: result.rows[0],
+    });
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(400).json({ error: 'A subscription already exists for this meter and year' });
+    }
+    console.error('[ADMIN] Error creating subscription:', err);
+    res.status(500).json({ error: 'Failed to create subscription', message: err.message });
+  }
+};
+
+/**
+ * Upload subscription receipt (Maker or Checker)
+ * POST /api/admin/subscriptions/:id/receipt
+ * Multipart form with 'receipt' file
+ */
+module.exports.uploadSubscriptionReceiptCtrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    if (!req.file) {
+      return res.status(400).json({ error: 'Receipt file is required' });
+    }
+
+    // Verify the subscription belongs to this user and is pending payment
+    const subResult = await query(
+      `SELECT * FROM meter_subscriptions WHERE id = $1 AND user_id = $2`,
+      [id, userId]
+    );
+
+    if (subResult.rows.length === 0) {
+      return res.status(404).json({ error: 'Subscription not found' });
+    }
+
+    if (subResult.rows[0].status !== 'pending_payment') {
+      return res.status(400).json({ error: 'Receipt can only be uploaded for subscriptions pending payment' });
+    }
+
+    const receiptPath = req.file.filename;
+
+    const result = await query(
+      `UPDATE meter_subscriptions
+       SET receipt_path = $1, status = 'pending_approval', updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [receiptPath, id]
+    );
+
+    res.json({
+      success: true,
+      message: 'Receipt uploaded successfully',
+      subscription: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error uploading subscription receipt:', err);
+    res.status(500).json({ error: 'Failed to upload receipt', message: err.message });
+  }
+};
+
+/**
+ * Get maker's own subscriptions
+ * GET /api/admin/my-subscriptions
+ */
+module.exports.getMySubscriptionsCtrl = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const result = await query(
+      `SELECT ms.*,
+              m.meter_identifier, m.iot_pubkey,
+              s.name as site_name, s.location as site_location,
+              r.email as reviewed_by_email
+       FROM meter_subscriptions ms
+       JOIN meters m ON ms.meter_id = m.id
+       LEFT JOIN sites s ON m.site_id = s.id
+       LEFT JOIN users r ON ms.reviewed_by = r.id
+       WHERE ms.user_id = $1
+       ORDER BY ms.created_at DESC`,
+      [userId]
+    );
+
+    res.json({ subscriptions: result.rows });
+  } catch (err) {
+    console.error('[ADMIN] Error fetching my subscriptions:', err);
+    res.status(500).json({ error: 'Failed to fetch subscriptions', message: err.message });
+  }
+};
+
+/**
+ * Get all subscriptions (Checker only)
+ * GET /api/admin/subscriptions
+ * Query params: status, limit, offset
+ */
+module.exports.getSubscriptionsCtrl = async (req, res) => {
+  try {
+    const { status, limit = 50, offset = 0 } = req.query;
+
+    let whereClause = '';
+    const params = [];
+
+    if (status) {
+      params.push(status);
+      whereClause = `WHERE ms.status = $${params.length}`;
+    }
+
+    params.push(parseInt(limit), parseInt(offset));
+
+    const countResult = await query(
+      `SELECT COUNT(*) FROM meter_subscriptions ms ${whereClause}`,
+      status ? [status] : []
+    );
+
+    const result = await query(
+      `SELECT ms.*,
+              m.meter_identifier, m.iot_pubkey,
+              s.name as site_name, s.location as site_location,
+              u.email as user_email, u.wallet_address as user_wallet,
+              r.email as reviewed_by_email
+       FROM meter_subscriptions ms
+       JOIN meters m ON ms.meter_id = m.id
+       LEFT JOIN sites s ON m.site_id = s.id
+       JOIN users u ON ms.user_id = u.id
+       LEFT JOIN users r ON ms.reviewed_by = r.id
+       ${whereClause}
+       ORDER BY ms.created_at DESC
+       LIMIT $${params.length - 1} OFFSET $${params.length}`,
+      params
+    );
+
+    res.json({
+      subscriptions: result.rows,
+      total: parseInt(countResult.rows[0].count),
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error fetching subscriptions:', err);
+    res.status(500).json({ error: 'Failed to fetch subscriptions', message: err.message });
+  }
+};
+
+/**
+ * Approve a subscription (Checker only)
+ * POST /api/admin/subscriptions/:id/approve
+ * Body: { notes }
+ */
+module.exports.approveSubscriptionCtrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+    const reviewerId = req.user.id;
+
+    const result = await query(
+      `UPDATE meter_subscriptions
+       SET status = 'active', reviewed_by = $1, reviewed_at = NOW(),
+           notes = $2, starts_at = NOW(), expires_at = NOW() + INTERVAL '1 year',
+           updated_at = NOW()
+       WHERE id = $3 AND status = 'pending_approval'
+       RETURNING *`,
+      [reviewerId, notes || null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Subscription not found or not pending approval' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Subscription approved and activated',
+      subscription: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error approving subscription:', err);
+    res.status(500).json({ error: 'Failed to approve subscription', message: err.message });
+  }
+};
+
+/**
+ * Reject a subscription (Checker only)
+ * POST /api/admin/subscriptions/:id/reject
+ * Body: { reason }
+ */
+module.exports.rejectSubscriptionCtrl = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const reviewerId = req.user.id;
+
+    if (!reason) {
+      return res.status(400).json({ error: 'Rejection reason is required' });
+    }
+
+    const result = await query(
+      `UPDATE meter_subscriptions
+       SET status = 'rejected', reviewed_by = $1, reviewed_at = NOW(),
+           rejection_reason = $2, updated_at = NOW()
+       WHERE id = $3 AND status = 'pending_approval'
+       RETURNING *`,
+      [reviewerId, reason, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Subscription not found or not pending approval' });
+    }
+
+    res.json({
+      success: true,
+      message: 'Subscription rejected',
+      subscription: result.rows[0],
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error rejecting subscription:', err);
+    res.status(500).json({ error: 'Failed to reject subscription', message: err.message });
+  }
+};
+
+// ============================================
+// TEST METER CREATION
+// ============================================
+
+/**
+ * Create a test meter (gated by feature_test_meter flag)
+ * POST /api/admin/test-meters
+ * Body: { seedTelemetry?: boolean }
+ */
+module.exports.createTestMeterCtrl = async (req, res) => {
+  try {
+    // Check feature flag
+    const flagResult = await query(
+      `SELECT value FROM platform_settings WHERE key = 'feature_flags'`
+    );
+
+    const flags = flagResult.rows.length > 0 ? flagResult.rows[0].value : {};
+    if (!flags.feature_test_meter) {
+      return res.status(403).json({ error: 'Test meter feature is not enabled' });
+    }
+
+    const { seedTelemetry } = req.body;
+
+    // Generate random meter identifier and pubkey
+    const meterIdentifier = `TEST-${crypto.randomBytes(6).toString('hex').toUpperCase()}`;
+    const pubkey = crypto.randomBytes(32).toString('base64');
+
+    // Register via existing registerMeter function
+    const result = await registerMeter({
+      meter_identifier: meterIdentifier,
+      iot_pubkey: pubkey,
+      asset_type: 'MONITORING_ONLY',
+    });
+
+    // Optionally seed ~48h of mock telemetry
+    if (seedTelemetry) {
+      const meterId = result.meter_id;
+      const now = new Date();
+      const values = [];
+      const placeholders = [];
+      let paramIndex = 1;
+
+      // Generate hourly readings for past 48 hours
+      for (let h = 48; h >= 0; h--) {
+        const ts = new Date(now.getTime() - h * 3600000);
+        const powerKw = (3 + Math.random() * 8).toFixed(2);
+        const energyKwh = (powerKw * 1).toFixed(2);
+        placeholders.push(`($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`);
+        values.push(meterId, ts.toISOString(), parseFloat(powerKw), parseFloat(energyKwh));
+      }
+
+      await query(
+        `INSERT INTO hourly_telemetry (meter_id, hour_start, avg_power_kw, energy_kwh)
+         VALUES ${placeholders.join(', ')}
+         ON CONFLICT DO NOTHING`,
+        values
+      );
+    }
+
+    res.json({
+      success: true,
+      message: 'Test meter created' + (seedTelemetry ? ' with seeded telemetry' : ''),
+      meter: {
+        id: result.meter_id,
+        meter_identifier: meterIdentifier,
+        iot_pubkey: pubkey,
+      },
+    });
+  } catch (err) {
+    console.error('[ADMIN] Error creating test meter:', err);
+    res.status(500).json({ error: 'Failed to create test meter', message: err.message });
+  }
+};
+
+// ============================================
+// CONSOLE SUBSCRIPTION STATUS CHECK (Public)
+// ============================================
+
+/**
+ * Check if a site has an active data subscription
+ * GET /api/locations/:locationId/subscription-status
+ * No auth required — used by GEN Console
+ */
+module.exports.getSubscriptionStatusCtrl = async (req, res) => {
+  try {
+    const { locationId } = req.params;
+
+    // Check feature flag — if OFF, always return subscribed
+    const flagResult = await query(
+      `SELECT value FROM platform_settings WHERE key = 'feature_flags'`
+    );
+
+    const flags = flagResult.rows.length > 0 ? flagResult.rows[0].value : {};
+    if (!flags.feature_data_subscription) {
+      return res.json({ subscribed: true });
+    }
+
+    // Check if any meter linked to this site has an active subscription for current year
+    const currentYear = new Date().getFullYear();
+    const result = await query(
+      `SELECT ms.id FROM meter_subscriptions ms
+       JOIN meters m ON ms.meter_id = m.id
+       WHERE m.site_id = $1
+         AND ms.year = $2
+         AND ms.status = 'active'
+         AND (ms.expires_at IS NULL OR ms.expires_at > NOW())
+       LIMIT 1`,
+      [locationId, currentYear]
+    );
+
+    res.json({ subscribed: result.rows.length > 0 });
+  } catch (err) {
+    console.error('[ADMIN] Error checking subscription status:', err);
+    res.status(500).json({ error: 'Failed to check subscription status', message: err.message });
   }
 };

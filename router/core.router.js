@@ -91,6 +91,18 @@ const {
   getMyMeterLinkRequestsCtrl,
   approveMeterLinkRequestCtrl,
   rejectMeterLinkRequestCtrl,
+  getFeatureFlagsCtrl,
+  setFeatureFlagCtrl,
+  getSubscriptionPriceCtrl,
+  setSubscriptionPriceCtrl,
+  createSubscriptionCtrl,
+  uploadSubscriptionReceiptCtrl,
+  getMySubscriptionsCtrl,
+  getSubscriptionsCtrl,
+  approveSubscriptionCtrl,
+  rejectSubscriptionCtrl,
+  createTestMeterCtrl,
+  getSubscriptionStatusCtrl,
 } = require('../components/controller/admin.controller');
 const {
   requireChecker,
@@ -268,6 +280,28 @@ coreRouter.get('/api/admin/meter-link-requests', requireChecker, getMeterLinkReq
 coreRouter.get('/api/admin/my-meter-link-requests', requireMakerOrChecker, getMyMeterLinkRequestsCtrl);
 coreRouter.post('/api/admin/meter-link-requests/:id/approve', requireChecker, approveMeterLinkRequestCtrl);
 coreRouter.post('/api/admin/meter-link-requests/:id/reject', requireChecker, rejectMeterLinkRequestCtrl);
+
+// Feature flags
+coreRouter.get('/api/admin/feature-flags', requireMakerOrChecker, getFeatureFlagsCtrl);
+coreRouter.put('/api/admin/feature-flags', requireChecker, setFeatureFlagCtrl);
+
+// Data subscription price
+coreRouter.get('/api/admin/subscription-price', requireMakerOrChecker, getSubscriptionPriceCtrl);
+coreRouter.put('/api/admin/subscription-price', requireChecker, setSubscriptionPriceCtrl);
+
+// Meter subscriptions
+coreRouter.post('/api/admin/subscriptions', requireMakerOrChecker, createSubscriptionCtrl);
+coreRouter.post('/api/admin/subscriptions/:id/receipt', requireMakerOrChecker, upload.single('receipt'), uploadSubscriptionReceiptCtrl);
+coreRouter.get('/api/admin/my-subscriptions', requireMakerOrChecker, getMySubscriptionsCtrl);
+coreRouter.get('/api/admin/subscriptions', requireChecker, getSubscriptionsCtrl);
+coreRouter.post('/api/admin/subscriptions/:id/approve', requireChecker, approveSubscriptionCtrl);
+coreRouter.post('/api/admin/subscriptions/:id/reject', requireChecker, rejectSubscriptionCtrl);
+
+// Test meters
+coreRouter.post('/api/admin/test-meters', requireMakerOrChecker, createTestMeterCtrl);
+
+// Console subscription status (public)
+coreRouter.get('/api/locations/:locationId/subscription-status', getSubscriptionStatusCtrl);
 
 // Node registration
 coreRouter.post('/node/register',
