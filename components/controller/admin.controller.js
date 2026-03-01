@@ -3157,25 +3157,54 @@ module.exports.createTestMeterCtrl = async (req, res) => {
     if (seedTelemetry) {
       const meterId = result.meter_id;
       const now = new Date();
-      const values = [];
-      const placeholders = [];
-      let paramIndex = 1;
 
-      // Generate hourly readings for past 48 hours
       for (let h = 48; h >= 0; h--) {
-        const ts = new Date(now.getTime() - h * 3600000);
-        const powerKw = (3 + Math.random() * 8).toFixed(2);
-        const energyKwh = (powerKw * 1).toFixed(2);
-        placeholders.push(`($${paramIndex++}, $${paramIndex++}, $${paramIndex++}, $${paramIndex++})`);
-        values.push(meterId, ts.toISOString(), parseFloat(powerKw), parseFloat(energyKwh));
-      }
+        const deviceTs = new Date(now.getTime() - h * 3600000);
+        const intervalStart = new Date(deviceTs);
+        intervalStart.setMinutes(0, 0, 0);
+        const intervalEnd = new Date(intervalStart);
+        intervalEnd.setHours(intervalEnd.getHours() + 1);
 
-      await query(
-        `INSERT INTO hourly_telemetry (meter_id, hour_start, avg_power_kw, energy_kwh)
-         VALUES ${placeholders.join(', ')}
-         ON CONFLICT DO NOTHING`,
-        values
-      );
+        const powerW = Math.round((3000 + Math.random() * 8000));
+        const energyWh = Math.round(powerW);
+        const payloadHash = crypto.createHash('sha256').update(`mock-${meterId}-${h}`).digest('hex');
+        const batchId = crypto.randomUUID();
+
+        // Create batch
+        await query(
+          `INSERT INTO telemetry_batches (
+            id, meter_id, batch_type, interval_start, interval_end,
+            device_timestamp, payload_hash, signature, status
+          ) VALUES ($1, $2, 'HOURLY', $3, $4, $5, $6, 'MOCK', 'VALIDATED')
+          ON CONFLICT DO NOTHING`,
+          [batchId, meterId, intervalStart, intervalEnd, deviceTs, payloadHash]
+        );
+
+        // Create raw data
+        await query(
+          `INSERT INTO telemetry_raw (
+            batch_id, power_l1_w, power_l2_w, power_l3_w, power_total_w,
+            energy_imp_l1_wh, energy_imp_l2_wh, energy_imp_l3_wh,
+            energy_exp_l1_wh, energy_exp_l2_wh, energy_exp_l3_wh,
+            energy_total_wh
+          ) VALUES ($1, $2, 0, 0, $2, $3, 0, 0, 0, 0, 0, $3)`,
+          [batchId, powerW, energyWh]
+        );
+
+        // Create metrics
+        const metrics = [
+          { metric: 'power_total_w', value: powerW, unit: 'W' },
+          { metric: 'energy_net_wh', value: energyWh, unit: 'Wh' },
+        ];
+        for (const m of metrics) {
+          await query(
+            `INSERT INTO telemetry_metrics (
+              meter_id, batch_id, metric, value, unit, recorded_at
+            ) VALUES ($1, $2, $3, $4, $5, $6)`,
+            [meterId, batchId, m.metric, m.value, m.unit, deviceTs]
+          );
+        }
+      }
     }
 
     res.json({
