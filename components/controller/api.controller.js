@@ -20,6 +20,7 @@ module.exports.getLocationsCtrl = async (req, res) => {
       FROM sites s
       LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
       LEFT JOIN telemetry_batches tb ON m.id = tb.meter_id
+      WHERE s.show_in_console = true
       GROUP BY s.id, s.name, s.location, s.latitude, s.longitude, m.id, m.meter_identifier, m.iot_pubkey, m.active
       ORDER BY s.name, m.meter_identifier`
     );
@@ -76,6 +77,7 @@ module.exports.getAllLocationsMetricsCtrl = async (req, res) => {
        FROM sites s
        LEFT JOIN organizations o ON s.organization_id = o.id
        LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
+       WHERE s.show_in_console = true
        ORDER BY s.name, m.id`
     );
 
