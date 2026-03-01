@@ -7,20 +7,25 @@ module.exports.getLocationsCtrl = async (req, res) => {
   try {
     const result = await query(
       `SELECT 
-        s.id as site_id,
-        s.name as site_name,
-        s.location,
-        m.id as meter_id,
-        m.meter_identifier,
-        m.iot_pubkey,
-        m.active,
-        COUNT(DISTINCT tb.id) as batch_count
-      FROM sites s
-      LEFT JOIN meters m ON s.id = m.site_id AND m.active = true
-      LEFT JOIN telemetry_batches tb ON m.id = tb.meter_id
-      GROUP BY s.id, s.name, s.location, s.latitude, s.longitude, m.id, m.meter_identifier, m.iot_pubkey, m.active
-      WHERE s.show_in_console = true
-      ORDER BY s.name, m.meter_identifier`
+    s.id as site_id,
+    s.name as site_name,
+    s.location,
+    m.id as meter_id,
+    m.meter_identifier,
+    m.iot_pubkey,
+    m.active,
+    COUNT(DISTINCT tb.id) as batch_count
+    FROM sites s
+    LEFT JOIN meters m 
+    ON s.id = m.site_id 
+    AND m.active = true
+    LEFT JOIN telemetry_batches tb 
+    ON m.id = tb.meter_id
+    WHERE s.show_in_console = true
+    GROUP BY 
+    s.id, s.name, s.location,
+    m.id, m.meter_identifier, m.iot_pubkey, m.active
+    ORDER BY s.name, m.meter_identifier;`
     );
 
     // Group by site
