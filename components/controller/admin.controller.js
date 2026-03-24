@@ -1123,9 +1123,9 @@ module.exports.getAllUsersCtrl = async (req, res) => {
     const offset = parseInt(req.query.offset) || 0;
 
     const result = await query(
-      `SELECT 
-        id, email, wallet_address, user_type, kyc_status, 
-        available_balance, created_at, updated_at
+      `SELECT
+        id, email, wallet_address, user_type, kyc_status,
+        available_balance, nda_signed, nda_signed_at, created_at, updated_at
        FROM users
        ORDER BY created_at DESC
        LIMIT $1 OFFSET $2`,
@@ -3262,5 +3262,154 @@ module.exports.getSubscriptionStatusCtrl = async (req, res) => {
   } catch (err) {
     console.error('[ADMIN] Error checking subscription status:', err);
     res.status(500).json({ error: 'Failed to check subscription status', message: err.message });
+  }
+};
+
+// ============================================
+// eNDA (Electronic Non-Disclosure Agreement)
+// ============================================
+
+/**
+ * Get NDA status for a user
+ * GET /api/users/:walletAddress/nda
+ */
+module.exports.getNdaStatusCtrl = async (req, res) => {
+  try {
+    const { walletAddress } = req.params;
+
+    const userResult = await query(
+      `SELECT id, nda_signed, nda_signed_at FROM users WHERE wallet_address = $1`,
+      [walletAddress]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userResult.rows[0];
+
+    if (user.nda_signed) {
+      // Get full NDA details
+      const ndaResult = await query(
+        `SELECT counterparty_legal_name, counterparty_address, signer_full_name, signed_at
+         FROM user_ndas WHERE user_id = $1`,
+        [user.id]
+      );
+
+      return res.json({
+        signed: true,
+        signed_at: user.nda_signed_at,
+        details: ndaResult.rows[0] || null,
+      });
+    }
+
+    res.json({ signed: false });
+  } catch (err) {
+    console.error('[NDA] Error getting NDA status:', err);
+    res.status(500).json({ error: 'Failed to get NDA status', message: err.message });
+  }
+};
+
+/**
+ * Sign NDA
+ * POST /api/users/:walletAddress/nda
+ * Body: { counterpartyLegalName, counterpartyAddress, signerFullName, signatureData }
+ */
+module.exports.signNdaCtrl = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { walletAddress } = req.params;
+    const { counterpartyLegalName, counterpartyAddress, signerFullName, signatureData } = req.body;
+
+    if (!counterpartyLegalName || !counterpartyAddress || !signerFullName || !signatureData) {
+      return res.status(400).json({
+        error: 'Missing required fields',
+        message: 'counterpartyLegalName, counterpartyAddress, signerFullName, and signatureData are required',
+      });
+    }
+
+    const userResult = await client.query(
+      `SELECT id, nda_signed FROM users WHERE wallet_address = $1`,
+      [walletAddress]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userResult.rows[0];
+
+    if (user.nda_signed) {
+      return res.status(400).json({ error: 'NDA already signed' });
+    }
+
+    const ipAddress = req.headers['x-forwarded-for'] || req.socket.remoteAddress || null;
+    const userAgent = req.headers['user-agent'] || null;
+
+    await client.query('BEGIN');
+
+    // Insert NDA record
+    await client.query(
+      `INSERT INTO user_ndas (user_id, counterparty_legal_name, counterparty_address, signer_full_name, signature_data, ip_address, user_agent)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [user.id, counterpartyLegalName, counterpartyAddress, signerFullName, signatureData, ipAddress, userAgent]
+    );
+
+    // Update user flag
+    await client.query(
+      `UPDATE users SET nda_signed = true, nda_signed_at = NOW() WHERE id = $1`,
+      [user.id]
+    );
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: 'NDA signed successfully',
+      signed_at: new Date().toISOString(),
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    console.error('[NDA] Error signing NDA:', err);
+    res.status(500).json({ error: 'Failed to sign NDA', message: err.message });
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * Get NDA details for a specific user (Checker only - for PDF download)
+ * GET /api/admin/users/:userId/nda
+ */
+module.exports.getUserNdaCtrl = async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    const result = await query(
+      `SELECT
+        n.id,
+        n.counterparty_legal_name,
+        n.counterparty_address,
+        n.signer_full_name,
+        n.signature_data,
+        n.signed_at,
+        n.ip_address,
+        n.user_agent,
+        u.email,
+        u.wallet_address
+       FROM user_ndas n
+       JOIN users u ON n.user_id = u.id
+       WHERE u.id = $1`,
+      [userId]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'NDA not found for this user' });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[NDA] Error getting user NDA:', err);
+    res.status(500).json({ error: 'Failed to get NDA', message: err.message });
   }
 };

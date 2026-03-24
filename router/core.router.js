@@ -103,6 +103,9 @@ const {
   rejectSubscriptionCtrl,
   createTestMeterCtrl,
   getSubscriptionStatusCtrl,
+  getNdaStatusCtrl,
+  signNdaCtrl,
+  getUserNdaCtrl,
 } = require('../components/controller/admin.controller');
 const {
   requireChecker,
@@ -302,6 +305,11 @@ coreRouter.post('/api/admin/test-meters', requireMakerOrChecker, createTestMeter
 
 // Console subscription status (public)
 coreRouter.get('/api/locations/:locationId/subscription-status', getSubscriptionStatusCtrl);
+
+// eNDA (Electronic Non-Disclosure Agreement)
+coreRouter.get('/api/users/:walletAddress/nda', getNdaStatusCtrl);
+coreRouter.post('/api/users/:walletAddress/nda', signNdaCtrl);
+coreRouter.get('/api/admin/users/:userId/nda', requireChecker, getUserNdaCtrl);
 
 // Node registration
 coreRouter.post('/node/register',
